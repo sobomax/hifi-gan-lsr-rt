@@ -9,7 +9,7 @@ on:
       - wip
 
 env:
-  CACHE_KEY_VER: v2
+  CACHE_KEY_VER: v3
   PIP_CMD: python -m pip install --user
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
       - name: Set up env
         run: |
           ${{ env.PIP_CMD }} --upgrade pip
-          echo "CACHE_PATH=`python -m site --user-site`" >> $GITHUB_ENV
+          echo "CACHE_PATH=`python -m site --user-site | sed 's|/lib/.*||'`" >> $GITHUB_ENV
           echo "CACHE_KEY_BASE=${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}" >> $GITHUB_ENV
 
       - name: Cache pip packages
