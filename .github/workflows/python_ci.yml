@@ -16,7 +16,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
         python-version: [3.10, 3.11]
     env:
-      CACHE_KEY_BASE: v1-${{ runner.os }}-${{ matrix.os }}-python${{ matrix.python-version }}
+      CACHE_KEY_BASE: v1-${{ matrix.os }}-python${{ matrix.python-version }}
     outputs:
       cache-hit: ${{ steps.cache.outputs.cache-hit }}
       cache_key_base: ${{ env.CACHE_KEY_BASE }}
