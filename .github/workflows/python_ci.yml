@@ -8,6 +8,10 @@ on:
     branches:
       - wip
 
+env:
+  CACHE_PATH: ~/.local
+  CACHE_KEY_VER: v1
+
 jobs:
   prepare-cache:
     runs-on: ${{ matrix.os }}
@@ -16,7 +20,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
         python-version: ['3.10', '3.11']
     env:
-      CACHE_KEY_BASE: v1-${{ matrix.os }}-python${{ matrix.python-version }}
+      CACHE_KEY_BASE: ${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}
     outputs:
       cache-hit: ${{ steps.cache.outputs.cache-hit }}
       cache_key_base: ${{ env.CACHE_KEY_BASE }}
@@ -33,7 +37,7 @@ jobs:
         id: cache
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
+          path: ${{ env.CACHE_PATH }}
           key: ${{ env.CACHE_KEY_BASE }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ env.CACHE_KEY_BASE }}-
@@ -66,7 +70,7 @@ jobs:
       - name: Restore pip cache
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
+          path: ${{ env.CACHE_PATH }}
           key: ${{ env.CACHE_KEY_BASE }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ env.CACHE_KEY_BASE }}-
