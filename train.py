@@ -1,3 +1,4 @@
+
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import itertools
@@ -18,7 +19,8 @@ from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator,
     discriminator_loss
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
 
-torch.backends.cudnn.benchmark = True
+import intel_extension_for_pytorch as ipex
+#torch.backends.cudnn.benchmark = True
 
 
 def train(rank, a, h):
@@ -26,8 +28,8 @@ def train(rank, a, h):
         init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
 
-    torch.cuda.manual_seed(h.seed)
-    device = torch.device('cuda:{:d}'.format(rank))
+    torch.manual_seed(h.seed)
+    device = torch.device(f'xpu:{rank}' if rank == 0 else 'cpu')
 
     generator = Generator(h).to(device)
     mpd = MultiPeriodDiscriminator().to(device)
@@ -50,6 +52,7 @@ def train(rank, a, h):
         state_dict_g = load_checkpoint(cp_g, device)
         state_dict_do = load_checkpoint(cp_do, device)
         generator.load_state_dict(state_dict_g['generator'])
+        #generator = torch.compile(generator
         mpd.load_state_dict(state_dict_do['mpd'])
         msd.load_state_dict(state_dict_do['msd'])
         steps = state_dict_do['steps'] + 1
@@ -99,6 +102,7 @@ def train(rank, a, h):
 
         sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
 
+    #torch.autograd.set_detect_anomaly(True)
     generator.train()
     mpd.train()
     msd.train()
@@ -186,7 +190,7 @@ def train(rank, a, h):
                 # Validation
                 if steps % a.validation_interval == 0:  # and steps != 0:
                     generator.eval()
-                    torch.cuda.empty_cache()
+                    #torch.cuda.empty_cache()
                     val_err_tot = 0
                     with torch.no_grad():
                         for j, batch in enumerate(validation_loader):
@@ -238,7 +242,7 @@ def main():
     parser.add_argument('--config', default='')
     parser.add_argument('--training_epochs', default=3100, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
-    parser.add_argument('--checkpoint_interval', default=5000, type=int)
+    parser.add_argument('--checkpoint_interval', default=500, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
     parser.add_argument('--validation_interval', default=1000, type=int)
     parser.add_argument('--fine_tuning', default=False, type=bool)
@@ -256,6 +260,7 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(h.seed)
         h.num_gpus = torch.cuda.device_count()
+        #h.num_gpus = 2
         h.batch_size = int(h.batch_size / h.num_gpus)
         print('Batch size per GPU :', h.batch_size)
     else:
