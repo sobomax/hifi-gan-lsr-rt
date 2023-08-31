@@ -12,13 +12,15 @@ from librosa.filters import mel as librosa_mel_fn
 
 MAX_WAV_VALUE = 32768.0
 
-def get_PBF(fs = 16000, l_cut = 75.0, h_cut = 4000.0):
+
+def get_PBF(fs=16000, l_cut=75.0, h_cut=4000.0):
     numtaps = 1024  # Number of filter taps (coefficients)
     coeffs = firwin(numtaps, [l_cut, h_cut], pass_zero='bandpass', fs=fs)
 
     # Convert to PyTorch tensor
     filter_kernel = torch.tensor(coeffs, dtype=torch.float32).view(1, 1, -1)
     return filter_kernel
+
 
 def load_wav(full_path, do_normalize):
     sampling_rate, data = read(full_path)
@@ -28,7 +30,7 @@ def load_wav(full_path, do_normalize):
 
     audio = torch.FloatTensor(data)
     audio = audio.unsqueeze(0)
-    o_flt = get_PBF(fs = sampling_rate)
+    o_flt = get_PBF(fs=sampling_rate)
     audio_flt = F.conv1d(audio.unsqueeze(0), o_flt, padding=(o_flt.size(2) - 1) // 2)
     return audio, audio_flt, sampling_rate
 

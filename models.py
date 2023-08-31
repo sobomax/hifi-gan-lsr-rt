@@ -112,7 +112,7 @@ class Generator(torch.nn.Module):
             x = x[:, :, chunk_size:]
             if debug:
                 print(f'y[0].size() = {y[0].size()}, x.size() = {x.size()}')
-        return torch.cat(y, dim = 2)
+        return torch.cat(y, dim=2)
 
     def _forward(self, x, debug):
         if debug:
