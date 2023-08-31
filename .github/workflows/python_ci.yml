@@ -9,8 +9,8 @@ on:
       - wip
 
 env:
-  CACHE_PATH: ~/.local
-  CACHE_KEY_VER: v1
+  CACHE_KEY_VER: v2
+  PIP_CMD: python -m pip install --user
 
 jobs:
   prepare-cache:
@@ -22,6 +22,7 @@ jobs:
     outputs:
       cache-hit: ${{ steps.cache.outputs.cache-hit }}
       cache_key_base: ${{ env.CACHE_KEY_BASE }}
+      cache_path: ${{ env.CACHE_PATH }}
     steps:
       - name: Set up env
         run: echo "CACHE_KEY_BASE=${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}" >> $GITHUB_ENV
@@ -33,6 +34,9 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
+        run: |
+          ${{ env.PIP_CMD }} --upgrade pip
+          echo "CACHE_PATH=`python -m site --user-site`" >> $GITHUB_ENV
 
       - name: Cache pip packages
         id: cache
@@ -46,11 +50,8 @@ jobs:
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          python -m site --user-site
-          false
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install flake8
+          ${{ env.PIP_CMD }} -r requirements.txt
+          ${{ env.PIP_CMD }} flake8
 
   lint:
     needs: prepare-cache
@@ -61,6 +62,7 @@ jobs:
         python-version: ['3.10', '3.11']
     env:
       CACHE_KEY_BASE: ${{ needs.prepare-cache.outputs.cache_key_base }}
+      CACHE_PATH: ${{ needs.prepare-cache.outputs.cache_path }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -74,16 +76,15 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.CACHE_PATH }}
-          key: ${{ env.CACHE_KEY_BASE }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ env.CACHE_KEY_BASE }}-
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install flake8
+          ${{ env.PIP_CMD }} --upgrade pip
+          ${{ env.PIP_CMD }} -r requirements.txt
+          ${{ env.PIP_CMD }} flake8
 
       - name: Lint with flake8
         run: |
