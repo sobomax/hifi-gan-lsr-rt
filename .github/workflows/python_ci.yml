@@ -73,11 +73,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Restore pip cache
-        uses: actions/cache@v3
+        uses: actions/cache/restore@v3
         with:
           path: ${{ env.CACHE_PATH }}
-          restore-keys: |
-            ${{ env.CACHE_KEY_BASE }}-
+          key: ${{ env.CACHE_KEY_BASE }}-
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
