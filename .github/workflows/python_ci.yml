@@ -46,6 +46,7 @@ jobs:
           key: ${{ env.CACHE_KEY_BASE }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ env.CACHE_KEY_BASE }}-
+          lookup-only: true
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
