@@ -46,6 +46,8 @@ jobs:
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
+          python -m site --user-site
+          false
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install flake8
