@@ -3,17 +3,34 @@ import os
 import random
 import torch
 import torch.utils.data
+import torch.nn.functional as F
 import numpy as np
 from librosa.util import normalize
 from scipy.io.wavfile import read
+from scipy.signal import firwin
 from librosa.filters import mel as librosa_mel_fn
 
 MAX_WAV_VALUE = 32768.0
 
+def get_PBF(fs = 16000, l_cut = 75.0, h_cut = 4000.0):
+    numtaps = 1024  # Number of filter taps (coefficients)
+    coeffs = firwin(numtaps, [l_cut, h_cut], pass_zero='bandpass', fs=fs)
 
-def load_wav(full_path):
+    # Convert to PyTorch tensor
+    filter_kernel = torch.tensor(coeffs, dtype=torch.float32).view(1, 1, -1)
+    return filter_kernel
+
+def load_wav(full_path, do_normalize):
     sampling_rate, data = read(full_path)
-    return data, sampling_rate
+    data = data / MAX_WAV_VALUE
+    if do_normalize:
+        data = normalize(data) * 0.95
+
+    audio = torch.FloatTensor(data)
+    audio = audio.unsqueeze(0)
+    o_flt = get_PBF(fs = sampling_rate)
+    audio_flt = F.conv1d(audio.unsqueeze(0), o_flt, padding=(o_flt.size(2) - 1) // 2)
+    return audio, audio_flt, sampling_rate
 
 
 def dynamic_range_compression(x, C=1, clip_val=1e-5):
@@ -60,10 +77,9 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
 
     y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
     y = y.squeeze(1)
-
     spec = torch.stft(y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window[str(y.device)],
-                      center=center, pad_mode='reflect', normalized=False, onesided=True)
-
+                      center=center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
+    spec = torch.view_as_real(spec)
     spec = torch.sqrt(spec.pow(2).sum(-1)+(1e-9))
 
     spec = torch.matmul(mel_basis[str(fmax)+'_'+str(y.device)], spec)
@@ -111,10 +127,7 @@ class MelDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         filename = self.audio_files[index]
         if self._cache_ref_count == 0:
-            audio, sampling_rate = load_wav(filename)
-            audio = audio / MAX_WAV_VALUE
-            if not self.fine_tuning:
-                audio = normalize(audio) * 0.95
+            audio, audio_flt, sampling_rate = load_wav(filename, not self.fine_tuning)
             self.cached_wav = audio
             if sampling_rate != self.sampling_rate:
                 raise ValueError("{} SR doesn't match target {} SR".format(
@@ -123,9 +136,6 @@ class MelDataset(torch.utils.data.Dataset):
         else:
             audio = self.cached_wav
             self._cache_ref_count -= 1
-
-        audio = torch.FloatTensor(audio)
-        audio = audio.unsqueeze(0)
 
         if not self.fine_tuning:
             if self.split:
