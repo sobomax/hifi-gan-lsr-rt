@@ -31,9 +31,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip${{ matrix.python-version }}-
+            ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -61,9 +61,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip${{ matrix.python-version }}-
+            ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-
 
       - name: Install dependencies
         run: |
