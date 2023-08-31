@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
-        python-version: [3.10, 3.11]
+        python-version: ['3.10', '3.11']
     env:
       CACHE_KEY_BASE: v1-${{ matrix.os }}-python${{ matrix.python-version }}
     outputs:
@@ -51,7 +51,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
-        python-version: [3.10, 3.11]
+        python-version: ['3.10', '3.11']
     env:
       CACHE_KEY_BASE: ${{ needs.prepare-cache.outputs.cache_key_base }}
     steps:
