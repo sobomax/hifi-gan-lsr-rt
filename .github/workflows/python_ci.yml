@@ -15,11 +15,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
         python-version: [3.10, 3.11]
+    env:
+      CACHE_KEY_BASE: v1-${{ runner.os }}-${{ matrix.os }}-python${{ matrix.python-version }}
     outputs:
       cache-hit: ${{ steps.cache.outputs.cache-hit }}
+      cache_key_base: ${{ env.CACHE_KEY_BASE }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
@@ -28,12 +31,12 @@ jobs:
 
       - name: Cache pip packages
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ env.CACHE_KEY_BASE }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-
+            ${{ env.CACHE_KEY_BASE }}-
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -49,9 +52,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
         python-version: [3.10, 3.11]
+    env:
+      CACHE_KEY_BASE: ${{ needs.prepare-cache.outputs.cache_key_base }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
@@ -59,12 +64,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Restore pip cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ env.CACHE_KEY_BASE }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.os }}-pip${{ matrix.python-version }}-
+            ${{ env.CACHE_KEY_BASE }}-
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
