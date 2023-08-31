@@ -19,12 +19,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-20.04, ubuntu-22.04]
         python-version: ['3.10', '3.11']
-    env:
-      CACHE_KEY_BASE: ${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}
     outputs:
       cache-hit: ${{ steps.cache.outputs.cache-hit }}
       cache_key_base: ${{ env.CACHE_KEY_BASE }}
     steps:
+      - name: Set up env
+        run: echo "CACHE_KEY_BASE=${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}" >> $GITHUB_ENV
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
