@@ -97,7 +97,26 @@ class Generator(torch.nn.Module):
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
 
-    def forward(self, x):
+    def forward(self, x, debug = False):
+        if not self.training:
+            return self.forward(x, debug)
+        if debug:
+            print(f'x.size = {x.size()}')
+        y = []
+        chunk_size = 2 ** int((torch.rand(1) * 4).round() + 1)
+        if debug:
+            print(chunk_size)
+        while x.size(2) > 0:
+            chunk = x[:, :, :chunk_size]
+            y.append(self._forward(chunk, debug))
+            x = x[:, :, chunk_size:]
+            if debug:
+                print(f'y[0].size() = {y[0].size()}, x.size() = {x.size()}')
+        return torch.cat(y, dim = 2)
+
+    def _forward(self, x, debug):
+        if debug:
+            print(f'x.size = {x.size()}')
         x = self.conv_pre(x)
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
