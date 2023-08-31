@@ -24,9 +24,6 @@ jobs:
       cache_key_base: ${{ env.CACHE_KEY_BASE }}
       cache_path: ${{ env.CACHE_PATH }}
     steps:
-      - name: Set up env
-        run: echo "CACHE_KEY_BASE=${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}" >> $GITHUB_ENV
-
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -34,9 +31,12 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Set up env
         run: |
           ${{ env.PIP_CMD }} --upgrade pip
           echo "CACHE_PATH=`python -m site --user-site`" >> $GITHUB_ENV
+          echo "CACHE_KEY_BASE=${{ env.CACHE_KEY_VER }}-${{ matrix.os }}-pip${{ matrix.python-version }}" >> $GITHUB_ENV
 
       - name: Cache pip packages
         id: cache
