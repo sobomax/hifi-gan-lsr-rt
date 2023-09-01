@@ -1,12 +1,19 @@
 name: Python CI
 
 on:
+  # Triggers the workflow on all push or pull request events
   push:
-    branches:
-      - wip
+#    branches:
+#      -some
   pull_request:
-    branches:
-      - wip
+#    branches:
+#      - wip
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+  schedule:
+    - cron: "20 0 * * *"
 
 env:
   CACHE_KEY_VER: v3
