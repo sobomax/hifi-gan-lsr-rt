@@ -1,0 +1,508 @@
+E501|./inference.py:1|line too long (82 > 79 characters)
+from __future__ import absolute_import, division, print_function, unicode_literals
+                                                                               ^
+E501|./inference.py:26|line too long (107 > 79 characters)
+    return mel_spectrogram(x, h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size, h.fmin, h.fmax)
+                                                                               ^
+E501|./inference.py:60|line too long (101 > 79 characters)
+            output_file = os.path.join(a.output_dir, os.path.splitext(filname)[0] + '_generated.wav')
+                                                                               ^
+E501|./inference.py:74|line too long (82 > 79 characters)
+    config_file = os.path.join(os.path.split(a.checkpoint_file)[0], 'config.json')
+                                                                               ^
+W391|./inference.py:95|blank line at end of file
+
+^
+E501|./inference_e2e.py:1|line too long (82 > 79 characters)
+from __future__ import absolute_import, division, print_function, unicode_literals
+                                                                               ^
+E501|./inference_e2e.py:55|line too long (105 > 79 characters)
+            output_file = os.path.join(a.output_dir, os.path.splitext(filname)[0] + '_generated_e2e.wav')
+                                                                               ^
+E501|./inference_e2e.py:69|line too long (82 > 79 characters)
+    config_file = os.path.join(os.path.split(a.checkpoint_file)[0], 'config.json')
+                                                                               ^
+W391|./inference_e2e.py:90|blank line at end of file
+
+^
+E501|./meldataset.py:34|line too long (85 > 79 characters)
+    audio_flt = F.conv1d(audio.unsqueeze(0), o_flt, padding=(o_flt.size(2) - 1) // 2)
+                                                                               ^
+E501|./meldataset.py:68|line too long (101 > 79 characters)
+def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False):
+                                                                               ^
+E226|./meldataset.py:77|missing whitespace around arithmetic operator
+        mel_basis[str(fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+                           ^
+E226|./meldataset.py:77|missing whitespace around arithmetic operator
+        mel_basis[str(fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+                               ^
+E501|./meldataset.py:77|line too long (91 > 79 characters)
+        mel_basis[str(fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+                                                                               ^
+E226|./meldataset.py:80|missing whitespace around arithmetic operator
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+                                                           ^
+E226|./meldataset.py:80|missing whitespace around arithmetic operator
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+                                                                     ^
+E501|./meldataset.py:80|line too long (115 > 79 characters)
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+                                                                               ^
+E226|./meldataset.py:80|missing whitespace around arithmetic operator
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+                                                                                    ^
+E226|./meldataset.py:80|missing whitespace around arithmetic operator
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+                                                                                              ^
+E501|./meldataset.py:82|line too long (108 > 79 characters)
+    spec = torch.stft(y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window[str(y.device)],
+                                                                               ^
+E501|./meldataset.py:83|line too long (110 > 79 characters)
+                      center=center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
+                                                                               ^
+E226|./meldataset.py:85|missing whitespace around arithmetic operator
+    spec = torch.sqrt(spec.pow(2).sum(-1)+(1e-9))
+                                         ^
+E226|./meldataset.py:87|missing whitespace around arithmetic operator
+    spec = torch.matmul(mel_basis[str(fmax)+'_'+str(y.device)], spec)
+                                           ^
+E226|./meldataset.py:87|missing whitespace around arithmetic operator
+    spec = torch.matmul(mel_basis[str(fmax)+'_'+str(y.device)], spec)
+                                               ^
+E501|./meldataset.py:95|line too long (82 > 79 characters)
+        training_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
+                                                                               ^
+E501|./meldataset.py:99|line too long (84 > 79 characters)
+        validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
+                                                                               ^
+E241|./meldataset.py:106|multiple spaces after ','
+                 hop_size, win_size, sampling_rate,  fmin, fmax, split=True, shuffle=True, n_cache_reuse=1,
+                                                   ^
+E501|./meldataset.py:106|line too long (107 > 79 characters)
+                 hop_size, win_size, sampling_rate,  fmin, fmax, split=True, shuffle=True, n_cache_reuse=1,
+                                                                               ^
+E501|./meldataset.py:107|line too long (86 > 79 characters)
+                 device=None, fmax_loss=None, fine_tuning=False, base_mels_path=None):
+                                                                               ^
+E501|./meldataset.py:132|line too long (86 > 79 characters)
+            audio, audio_flt, sampling_rate = load_wav(filename, not self.fine_tuning)
+                                                                               ^
+E226|./meldataset.py:147|missing whitespace around arithmetic operator
+                    audio = audio[:, audio_start:audio_start+self.segment_size]
+                                                            ^
+E501|./meldataset.py:149|line too long (110 > 79 characters)
+                    audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
+                                                                               ^
+E501|./meldataset.py:152|line too long (105 > 79 characters)
+                                  self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
+                                                                               ^
+E501|./meldataset.py:156|line too long (109 > 79 characters)
+                os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + '.npy'))
+                                                                               ^
+E501|./meldataset.py:166|line too long (83 > 79 characters)
+                    mel_start = random.randint(0, mel.size(2) - frames_per_seg - 1)
+                                                                               ^
+E501|./meldataset.py:168|line too long (108 > 79 characters)
+                    audio = audio[:, mel_start * self.hop_size:(mel_start + frames_per_seg) * self.hop_size]
+                                                                               ^
+E501|./meldataset.py:170|line too long (101 > 79 characters)
+                    mel = torch.nn.functional.pad(mel, (0, frames_per_seg - mel.size(2)), 'constant')
+                                                                               ^
+E501|./meldataset.py:171|line too long (110 > 79 characters)
+                    audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
+                                                                               ^
+E501|./meldataset.py:174|line too long (111 > 79 characters)
+                                   self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
+                                                                               ^
+E501|./models.py:16|line too long (88 > 79 characters)
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                                                                               ^
+E501|./models.py:18|line too long (88 > 79 characters)
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                                                                               ^
+E501|./models.py:20|line too long (88 > 79 characters)
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[2],
+                                                                               ^
+E741|./models.py:45|ambiguous variable name 'l'
+        for l in self.convs1:
+            ^
+E741|./models.py:47|ambiguous variable name 'l'
+        for l in self.convs2:
+            ^
+E501|./models.py:56|line too long (88 > 79 characters)
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                                                                               ^
+E501|./models.py:58|line too long (88 > 79 characters)
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                                                                               ^
+E741|./models.py:71|ambiguous variable name 'l'
+        for l in self.convs:
+            ^
+E501|./models.py:81|line too long (92 > 79 characters)
+        self.conv_pre = weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
+                                                                               ^
+E501|./models.py:85|line too long (83 > 79 characters)
+        for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
+                                                                               ^
+E226|./models.py:87|missing whitespace around arithmetic operator
+                ConvTranspose1d(h.upsample_initial_channel//(2**i), h.upsample_initial_channel//(2**(i+1)),
+                                                          ^
+E501|./models.py:87|line too long (107 > 79 characters)
+                ConvTranspose1d(h.upsample_initial_channel//(2**i), h.upsample_initial_channel//(2**(i+1)),
+                                                                               ^
+E226|./models.py:87|missing whitespace around arithmetic operator
+                ConvTranspose1d(h.upsample_initial_channel//(2**i), h.upsample_initial_channel//(2**(i+1)),
+                                                                                              ^
+E226|./models.py:87|missing whitespace around arithmetic operator
+                ConvTranspose1d(h.upsample_initial_channel//(2**i), h.upsample_initial_channel//(2**(i+1)),
+                                                                                                      ^
+E226|./models.py:88|missing whitespace around arithmetic operator
+                                k, u, padding=(k-u)//2)))
+                                                ^
+E226|./models.py:88|missing whitespace around arithmetic operator
+                                k, u, padding=(k-u)//2)))
+                                                   ^
+E226|./models.py:92|missing whitespace around arithmetic operator
+            ch = h.upsample_initial_channel//(2**(i+1))
+                                           ^
+E226|./models.py:92|missing whitespace around arithmetic operator
+            ch = h.upsample_initial_channel//(2**(i+1))
+                                                   ^
+E501|./models.py:93|line too long (96 > 79 characters)
+            for j, (k, d) in enumerate(zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes)):
+                                                                               ^
+E251|./models.py:100|unexpected spaces around keyword / parameter equals
+    def forward(self, x, debug = False):
+                              ^
+E251|./models.py:100|unexpected spaces around keyword / parameter equals
+    def forward(self, x, debug = False):
+                                ^
+E226|./models.py:127|missing whitespace around arithmetic operator
+                    xs = self.resblocks[i*self.num_kernels+j](x)
+                                         ^
+E226|./models.py:127|missing whitespace around arithmetic operator
+                    xs = self.resblocks[i*self.num_kernels+j](x)
+                                                          ^
+E226|./models.py:129|missing whitespace around arithmetic operator
+                    xs += self.resblocks[i*self.num_kernels+j](x)
+                                          ^
+E226|./models.py:129|missing whitespace around arithmetic operator
+                    xs += self.resblocks[i*self.num_kernels+j](x)
+                                                           ^
+E741|./models.py:139|ambiguous variable name 'l'
+        for l in self.ups:
+            ^
+E741|./models.py:141|ambiguous variable name 'l'
+        for l in self.resblocks:
+            ^
+E501|./models.py:148|line too long (81 > 79 characters)
+    def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
+                                                                               ^
+E712|./models.py:151|comparison to False should be 'if cond is False:' or 'if not cond:'
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+                                                  ^
+E501|./models.py:153|line too long (97 > 79 characters)
+            norm_f(Conv2d(1, 32, (kernel_size, 1), (stride, 1), padding=(get_padding(5, 1), 0))),
+                                                                               ^
+E501|./models.py:154|line too long (99 > 79 characters)
+            norm_f(Conv2d(32, 128, (kernel_size, 1), (stride, 1), padding=(get_padding(5, 1), 0))),
+                                                                               ^
+E501|./models.py:155|line too long (100 > 79 characters)
+            norm_f(Conv2d(128, 512, (kernel_size, 1), (stride, 1), padding=(get_padding(5, 1), 0))),
+                                                                               ^
+E501|./models.py:156|line too long (101 > 79 characters)
+            norm_f(Conv2d(512, 1024, (kernel_size, 1), (stride, 1), padding=(get_padding(5, 1), 0))),
+                                                                               ^
+E261|./models.py:166|at least two spaces before inline comment
+        if t % self.period != 0: # pad first
+                                ^
+E741|./models.py:172|ambiguous variable name 'l'
+        for l in self.convs:
+            ^
+E712|./models.py:213|comparison to False should be 'if cond is False:' or 'if not cond:'
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+                                                  ^
+E741|./models.py:227|ambiguous variable name 'l'
+        for l in self.convs:
+            ^
+E226|./models.py:258|missing whitespace around arithmetic operator
+                y = self.meanpools[i-1](y)
+                                    ^
+E226|./models.py:259|missing whitespace around arithmetic operator
+                y_hat = self.meanpools[i-1](y_hat)
+                                        ^
+E226|./models.py:276|missing whitespace around arithmetic operator
+    return loss*2
+               ^
+E226|./models.py:284|missing whitespace around arithmetic operator
+        r_loss = torch.mean((1-dr)**2)
+                              ^
+E741|./models.py:297|ambiguous variable name 'l'
+        l = torch.mean((1-dg)**2)
+        ^
+E226|./models.py:297|missing whitespace around arithmetic operator
+        l = torch.mean((1-dg)**2)
+                         ^
+W391|./models.py:302|blank line at end of file
+
+^
+E402|./train.py:4|module level import not at top of file
+import itertools
+^
+E402|./train.py:5|module level import not at top of file
+import os
+^
+E402|./train.py:6|module level import not at top of file
+import time
+^
+E402|./train.py:7|module level import not at top of file
+import argparse
+^
+E402|./train.py:8|module level import not at top of file
+import json
+^
+E402|./train.py:9|module level import not at top of file
+import torch
+^
+E402|./train.py:10|module level import not at top of file
+import torch.nn.functional as F
+^
+E402|./train.py:11|module level import not at top of file
+from torch.utils.tensorboard import SummaryWriter
+^
+E402|./train.py:12|module level import not at top of file
+from torch.utils.data import DistributedSampler, DataLoader
+^
+E402|./train.py:13|module level import not at top of file
+import torch.multiprocessing as mp
+^
+E402|./train.py:14|module level import not at top of file
+from torch.distributed import init_process_group
+^
+E402|./train.py:15|module level import not at top of file
+from torch.nn.parallel import DistributedDataParallel
+^
+E402|./train.py:16|module level import not at top of file
+from env import AttrDict, build_env
+^
+E402|./train.py:17|module level import not at top of file
+from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist
+^
+E402|./train.py:18|module level import not at top of file
+from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
+    discriminator_loss
+^
+E501|./train.py:18|line too long (111 > 79 characters)
+from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
+    discriminator_loss
+                                                                               ^
+E231|./train.py:18|missing whitespace after ','
+from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
+    discriminator_loss
+                                                                                                             ^
+E402|./train.py:20|module level import not at top of file
+from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
+^
+E501|./train.py:20|line too long (85 > 79 characters)
+from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
+                                                                               ^
+F401|./train.py:22|'intel_extension_for_pytorch as ipex' imported but unused
+import intel_extension_for_pytorch as ipex
+^
+E402|./train.py:22|module level import not at top of file
+import intel_extension_for_pytorch as ipex
+^
+E265|./train.py:23|block comment should start with '# '
+#torch.backends.cudnn.benchmark = True
+^
+E501|./train.py:28|line too long (104 > 79 characters)
+        init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
+                                                                               ^
+E501|./train.py:29|line too long (90 > 79 characters)
+                           world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
+                                                                               ^
+E265|./train.py:55|block comment should start with '# '
+        #generator = torch.compile(generator
+        ^
+E501|./train.py:62|line too long (84 > 79 characters)
+        generator = DistributedDataParallel(generator, device_ids=[rank]).to(device)
+                                                                               ^
+E501|./train.py:66|line too long (102 > 79 characters)
+    optim_g = torch.optim.AdamW(generator.parameters(), h.learning_rate, betas=[h.adam_b1, h.adam_b2])
+                                                                               ^
+E501|./train.py:67|line too long (84 > 79 characters)
+    optim_d = torch.optim.AdamW(itertools.chain(msd.parameters(), mpd.parameters()),
+                                                                               ^
+E501|./train.py:74|line too long (106 > 79 characters)
+    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
+                                                                               ^
+E501|./train.py:75|line too long (106 > 79 characters)
+    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=h.lr_decay, last_epoch=last_epoch)
+                                                                               ^
+E501|./train.py:79|line too long (81 > 79 characters)
+    trainset = MelDataset(training_filelist, h.segment_size, h.n_fft, h.num_mels,
+                                                                               ^
+E501|./train.py:80|line too long (99 > 79 characters)
+                          h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,
+                                                                               ^
+E501|./train.py:81|line too long (110 > 79 characters)
+                          shuffle=False if h.num_gpus > 1 else True, fmax_loss=h.fmax_for_loss, device=device,
+                                                                               ^
+E501|./train.py:82|line too long (85 > 79 characters)
+                          fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
+                                                                               ^
+E501|./train.py:86|line too long (81 > 79 characters)
+    train_loader = DataLoader(trainset, num_workers=h.num_workers, shuffle=False,
+                                                                               ^
+E501|./train.py:93|line too long (87 > 79 characters)
+        validset = MelDataset(validation_filelist, h.segment_size, h.n_fft, h.num_mels,
+                                                                               ^
+E501|./train.py:94|line too long (117 > 79 characters)
+                              h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
+                                                                               ^
+E501|./train.py:95|line too long (98 > 79 characters)
+                              fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
+                                                                               ^
+E265|./train.py:105|block comment should start with '# '
+    #torch.autograd.set_detect_anomaly(True)
+    ^
+E226|./train.py:112|missing whitespace around arithmetic operator
+            print("Epoch: {}".format(epoch+1))
+                                          ^
+E501|./train.py:123|line too long (80 > 79 characters)
+            y_mel = torch.autograd.Variable(y_mel.to(device, non_blocking=True))
+                                                                               ^
+E501|./train.py:127|line too long (123 > 79 characters)
+            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
+                                                                               ^
+E501|./train.py:134|line too long (102 > 79 characters)
+            loss_disc_f, losses_disc_f_r, losses_disc_f_g = discriminator_loss(y_df_hat_r, y_df_hat_g)
+                                                                               ^
+E501|./train.py:138|line too long (102 > 79 characters)
+            loss_disc_s, losses_disc_s_r, losses_disc_s_g = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
+                                                                               ^
+E501|./train.py:157|line too long (85 > 79 characters)
+            loss_gen_all = loss_gen_s + loss_gen_f + loss_fm_s + loss_fm_f + loss_mel
+                                                                               ^
+E501|./train.py:168|line too long (109 > 79 characters)
+                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
+                                                                               ^
+E501|./train.py:169|line too long (88 > 79 characters)
+                          format(steps, loss_gen_all, mel_error, time.time() - start_b))
+                                                                               ^
+E501|./train.py:173|line too long (84 > 79 characters)
+                    checkpoint_path = "{}/g_{:08d}".format(a.checkpoint_path, steps)
+                                                                               ^
+E501|./train.py:175|line too long (116 > 79 characters)
+                                    {'generator': (generator.module if h.num_gpus > 1 else generator).state_dict()})
+                                                                               ^
+E501|./train.py:176|line too long (85 > 79 characters)
+                    checkpoint_path = "{}/do_{:08d}".format(a.checkpoint_path, steps)
+                                                                               ^
+W291|./train.py:177|trailing whitespace
+                    save_checkpoint(checkpoint_path, 
+                                                    ^
+E127|./train.py:179|continuation line over-indented for visual indent
+                                                         else mpd).state_dict(),
+                                                         ^
+E501|./train.py:179|line too long (80 > 79 characters)
+                                                         else mpd).state_dict(),
+                                                                               ^
+E127|./train.py:181|continuation line over-indented for visual indent
+                                                         else msd).state_dict(),
+                                                         ^
+E501|./train.py:181|line too long (80 > 79 characters)
+                                                         else msd).state_dict(),
+                                                                               ^
+E501|./train.py:182|line too long (118 > 79 characters)
+                                     'optim_g': optim_g.state_dict(), 'optim_d': optim_d.state_dict(), 'steps': steps,
+                                                                               ^
+E501|./train.py:187|line too long (81 > 79 characters)
+                    sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
+                                                                               ^
+E265|./train.py:193|block comment should start with '# '
+                    #torch.cuda.empty_cache()
+                    ^
+E501|./train.py:199|line too long (96 > 79 characters)
+                            y_mel = torch.autograd.Variable(y_mel.to(device, non_blocking=True))
+                                                                               ^
+E501|./train.py:200|line too long (115 > 79 characters)
+                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
+                                                                               ^
+E501|./train.py:201|line too long (81 > 79 characters)
+                                                          h.hop_size, h.win_size,
+                                                                               ^
+E501|./train.py:202|line too long (82 > 79 characters)
+                                                          h.fmin, h.fmax_for_loss)
+                                                                               ^
+E501|./train.py:207|line too long (99 > 79 characters)
+                                    sw.add_audio('gt/y_{}'.format(j), y[0], steps, h.sampling_rate)
+                                                                               ^
+E501|./train.py:208|line too long (106 > 79 characters)
+                                    sw.add_figure('gt/y_spec_{}'.format(j), plot_spectrogram(x[0]), steps)
+                                                                               ^
+E501|./train.py:210|line too long (112 > 79 characters)
+                                sw.add_audio('generated/y_hat_{}'.format(j), y_g_hat[0], steps, h.sampling_rate)
+                                                                               ^
+E501|./train.py:211|line too long (101 > 79 characters)
+                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
+                                                                               ^
+E501|./train.py:212|line too long (101 > 79 characters)
+                                                             h.sampling_rate, h.hop_size, h.win_size,
+                                                                               ^
+E501|./train.py:214|line too long (82 > 79 characters)
+                                sw.add_figure('generated/y_hat_spec_{}'.format(j),
+                                                                               ^
+E501|./train.py:215|line too long (107 > 79 characters)
+                                              plot_spectrogram(y_hat_spec.squeeze(0).cpu().numpy()), steps)
+                                                                               ^
+E226|./train.py:217|missing whitespace around arithmetic operator
+                        val_err = val_err_tot / (j+1)
+                                                  ^
+E501|./train.py:218|line too long (82 > 79 characters)
+                        sw.add_scalar("validation/mel_spec_error", val_err, steps)
+                                                                               ^
+W293|./train.py:226|blank line contains whitespace
+        
+^
+E501|./train.py:228|line too long (100 > 79 characters)
+            print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(time.time() - start)))
+                                                                               ^
+E501|./train.py:239|line too long (85 > 79 characters)
+    parser.add_argument('--input_training_file', default='LJSpeech-1.1/training.txt')
+                                                                               ^
+E501|./train.py:240|line too long (89 > 79 characters)
+    parser.add_argument('--input_validation_file', default='LJSpeech-1.1/validation.txt')
+                                                                               ^
+E265|./train.py:263|block comment should start with '# '
+        #h.num_gpus = 2
+        ^
+E402|./utils.py:7|module level import not at top of file
+import matplotlib.pylab as plt
+^
+E226|./utils.py:35|missing whitespace around arithmetic operator
+    return int((kernel_size*dilation - dilation)/2)
+                           ^
+E226|./utils.py:35|missing whitespace around arithmetic operator
+    return int((kernel_size*dilation - dilation)/2)
+                                                ^
+W391|./utils.py:58|blank line at end of file
+
+^
+2     E127 continuation line over-indented for visual indent
+30    E226 missing whitespace around arithmetic operator
+1     E231 missing whitespace after ','
+1     E241 multiple spaces after ','
+2     E251 unexpected spaces around keyword / parameter equals
+1     E261 at least two spaces before inline comment
+5     E265 block comment should start with '# '
+18    E402 module level import not at top of file
+86    E501 line too long (82 > 79 characters)
+2     E712 comparison to False should be 'if cond is False:' or 'if not cond:'
+8     E741 ambiguous variable name 'l'
+1     F401 'intel_extension_for_pytorch as ipex' imported but unused
+1     W291 trailing whitespace
+1     W293 blank line contains whitespace
+4     W391 blank line at end of file
+163
