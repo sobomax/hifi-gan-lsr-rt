@@ -99,7 +99,7 @@ class Generator(torch.nn.Module):
 
     def forward(self, x, debug = False):
         if not self.training:
-            return self.forward(x, debug)
+            return self._forward(x, debug)
         if debug:
             print(f'x.size = {x.size()}')
         y = []
