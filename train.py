@@ -208,11 +208,17 @@ def train(rank, a, h):
                                     sw.add_figure('gt/y_spec_{}'.format(j), plot_spectrogram(x[0]), steps)
 
                                 sw.add_audio('generated/y_hat_{}'.format(j), y_g_hat[0], steps, h.sampling_rate)
+                                gx_name = 'input/generator_x_{}'.format(j)
+                                gx_data = x.squeeze(0).cpu().numpy()
+                                gx_spec = plot_spectrogram(gx_data)
+                                sw.add_figure(gx_name, gx_spec, steps)
                                 y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
                                                              h.sampling_rate, h.hop_size, h.win_size,
                                                              h.fmin, h.fmax)
-                                sw.add_figure('generated/y_hat_spec_{}'.format(j),
-                                              plot_spectrogram(y_hat_spec.squeeze(0).cpu().numpy()), steps)
+                                yhs_name = 'generated/y_hat_spec_{}'.format(j)
+                                yhs_data = y_hat_spec.squeeze(0).cpu().numpy()
+                                yhs_spec = plot_spectrogram(yhs_data)
+                                sw.add_figure(yhs_name, yhs_spec, steps)
 
                         val_err = val_err_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
