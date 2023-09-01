@@ -1,8 +1,8 @@
-torch==2.0.1
-numpy==1.24.4
-librosa==0.9.1
-scipy==1.11.2
-tensorboard==2.14.0
-soundfile==0.12.1
-matplotlib==3.7.2
+torch>=2.*
+numpy>=1.*
+librosa>=0.*
+scipy>=1.*
+tensorboard>=2.*
+soundfile>=0.*
+matplotlib>=3.*
 transformers>=4.*
