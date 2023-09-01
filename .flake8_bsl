@@ -88,31 +88,32 @@ E501|./meldataset.py:107|line too long (86 > 79 characters)
 E501|./meldataset.py:132|line too long (86 > 79 characters)
             audio, audio_flt, sampling_rate = load_wav(filename, not self.fine_tuning)
                                                                                ^
-E226|./meldataset.py:147|missing whitespace around arithmetic operator
+E226|./meldataset.py:149|missing whitespace around arithmetic operator
                     audio = audio[:, audio_start:audio_start+self.segment_size]
                                                             ^
-E501|./meldataset.py:149|line too long (110 > 79 characters)
-                    audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
-                                                                               ^
-E501|./meldataset.py:152|line too long (105 > 79 characters)
+E502|./meldataset.py:150|the backslash is redundant between brackets
+                    audio_flt = audio_flt[:, audio_start:audio_start + \
+                                          self.segment_size]
+                                                                       ^
+E501|./meldataset.py:158|line too long (105 > 79 characters)
                                   self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
                                                                                ^
-E501|./meldataset.py:156|line too long (109 > 79 characters)
+E501|./meldataset.py:163|line too long (109 > 79 characters)
                 os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + '.npy'))
                                                                                ^
-E501|./meldataset.py:166|line too long (83 > 79 characters)
+E501|./meldataset.py:173|line too long (83 > 79 characters)
                     mel_start = random.randint(0, mel.size(2) - frames_per_seg - 1)
                                                                                ^
-E501|./meldataset.py:168|line too long (108 > 79 characters)
+E501|./meldataset.py:175|line too long (108 > 79 characters)
                     audio = audio[:, mel_start * self.hop_size:(mel_start + frames_per_seg) * self.hop_size]
                                                                                ^
-E501|./meldataset.py:170|line too long (101 > 79 characters)
+E501|./meldataset.py:177|line too long (101 > 79 characters)
                     mel = torch.nn.functional.pad(mel, (0, frames_per_seg - mel.size(2)), 'constant')
                                                                                ^
-E501|./meldataset.py:171|line too long (110 > 79 characters)
+E501|./meldataset.py:178|line too long (110 > 79 characters)
                     audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
                                                                                ^
-E501|./meldataset.py:174|line too long (111 > 79 characters)
+E501|./meldataset.py:181|line too long (111 > 79 characters)
                                    self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
                                                                                ^
 E501|./models.py:16|line too long (88 > 79 characters)
@@ -498,7 +499,8 @@ W391|./utils.py:58|blank line at end of file
 1     E261 at least two spaces before inline comment
 5     E265 block comment should start with '# '
 18    E402 module level import not at top of file
-86    E501 line too long (82 > 79 characters)
+85    E501 line too long (82 > 79 characters)
+1     E502 the backslash is redundant between brackets
 2     E712 comparison to False should be 'if cond is False:' or 'if not cond:'
 8     E741 ambiguous variable name 'l'
 1     F401 'intel_extension_for_pytorch as ipex' imported but unused
