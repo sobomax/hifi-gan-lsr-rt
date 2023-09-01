@@ -139,7 +139,7 @@ class MelDataset(torch.utils.data.Dataset):
             audio, audio_flt = self.cached_wav
             self._cache_ref_count -= 1
 
-        assert(audio.size() == audio_flt.size())
+        assert (audio.size() == audio_flt.size())
 
         if not self.fine_tuning:
             if self.split:
@@ -147,7 +147,8 @@ class MelDataset(torch.utils.data.Dataset):
                     max_audio_start = audio.size(1) - self.segment_size
                     audio_start = random.randint(0, max_audio_start)
                     audio = audio[:, audio_start:audio_start+self.segment_size]
-                    audio_flt = audio_flt[:, audio_start:audio_start+self.segment_size]
+                    audio_flt = audio_flt[:, audio_start:audio_start + \
+                                          self.segment_size]
                 else:
                     pad_size = (0, self.segment_size - audio.size(1))
                     audio = F.pad(audio, pad_size, 'constant')
