@@ -14,7 +14,7 @@ MAX_WAV_VALUE = 32768.0
 
 
 def get_PBF(fs=16000, l_cut=75.0, h_cut=4000.0):
-    numtaps = 1024  # Number of filter taps (coefficients)
+    numtaps = 1023  # Number of filter taps (coefficients)
     coeffs = firwin(numtaps, [l_cut, h_cut], pass_zero='bandpass', fs=fs)
 
     # Convert to PyTorch tensor
@@ -32,7 +32,7 @@ def load_wav(full_path, do_normalize):
     audio = audio.unsqueeze(0)
     o_flt = get_PBF(fs=sampling_rate)
     audio_flt = F.conv1d(audio.unsqueeze(0), o_flt, padding=(o_flt.size(2) - 1) // 2)
-    return audio, audio_flt, sampling_rate
+    return audio, audio_flt.squeeze(0), sampling_rate
 
 
 def dynamic_range_compression(x, C=1, clip_val=1e-5):
