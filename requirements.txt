@@ -5,3 +5,4 @@ scipy==1.11.2
 tensorboard==2.14.0
 soundfile==0.12.1
 matplotlib==3.7.2
+transformers>=4.*
