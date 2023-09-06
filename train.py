@@ -19,7 +19,6 @@ from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator,
     discriminator_loss
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
 
-import intel_extension_for_pytorch as ipex
 import multiprocessing
 from transformers import SpeechT5HifiGan, SpeechT5HifiGanConfig
 #torch.backends.cudnn.benchmark = True
@@ -51,12 +50,14 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
         return torch.cat(y, dim=1)
 
 def train(rank, a, h):
+    if a.device == 'xpu':
+        import intel_extension_for_pytorch as ipex
     if h.num_gpus > 1:
         init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
 
     torch.manual_seed(h.seed)
-    device = torch.device(f'xpu:{rank}' if rank == 0 else 'cpu')
+    device = torch.device(f'{a.device}:{rank}' if rank == 0 else 'cpu')
 
     #generator = Generator(h).to(device)
     #generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
@@ -119,7 +120,7 @@ def train(rank, a, h):
     training_filelist, validation_filelist = get_dataset_filelist(a)
 
     trainset = MelDataset(training_filelist, h.segment_size, h.n_fft, h.num_mels,
-                          h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,
+                          h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=1024,
                           shuffle=False if h.num_gpus > 1 else True, fmax_loss=h.fmax_for_loss, device=device,
                           fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
 
@@ -129,7 +130,8 @@ def train(rank, a, h):
                               sampler=train_sampler,
                               batch_size=h.batch_size,
                               pin_memory=True,
-                              drop_last=True)
+                              drop_last=True,
+                              persistent_workers=True if h.num_workers > 0 else False)
 
     if a.precompute_mels:
         for i, batch in enumerate(train_loader):
@@ -138,7 +140,7 @@ def train(rank, a, h):
 
     if rank == 0:
         validset = MelDataset(validation_filelist, h.segment_size, h.n_fft, h.num_mels,
-                              h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
+                              h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=1024,
                               fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
                               base_mels_path=a.input_mels_dir)
         nw = min(1, h.num_workers)
@@ -146,7 +148,8 @@ def train(rank, a, h):
                                        sampler=None,
                                        batch_size=1,
                                        pin_memory=True,
-                                       drop_last=True)
+                                       drop_last=True,
+                                       persistent_workers=True if nw > 0 else False)
 
         sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
 
@@ -356,6 +359,7 @@ def main():
     parser.add_argument('--generator_only', default=False, type=bool)
     parser.add_argument('--precompute_mels', default=False, type=bool)
     parser.add_argument('--focus_mels', default=False, type=bool)
+    parser.add_argument('--device', default='cuda')
 
     a = parser.parse_args()
 
