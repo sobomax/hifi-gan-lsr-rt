@@ -159,7 +159,7 @@ class MelDataset(torch.utils.data.Dataset):
         self.fmin = fmin
         self.fmax = fmax
         self.fmax_loss = fmax_loss
-        self.cached_wav = None
+        self.cached_wav = {}
         self.n_cache_reuse = n_cache_reuse
         self._cache_ref_count = 0
         self.device = device
@@ -222,19 +222,20 @@ class MelDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         #assert not self.split
         filename = self.audio_files[index]
-        if self._cache_ref_count == 0:
+        if not filename in self.cached_wav:
+            #print(f'cache miss {filename}, cache_len={len(self.cached_wav.keys())}')
             audio, audio_flt, sampling_rate = load_wav(filename, not self.fine_tuning)
             if self.fine_tuning:
                 audio, mel = self.getMelRef(audio, filename)
-            self.cached_wav = (audio, mel, filename)
+            self.cached_wav[filename] = (audio, mel, filename)
             if sampling_rate != self.sampling_rate:
                 raise ValueError("{} SR doesn't match target {} SR".format(
                     sampling_rate, self.sampling_rate))
             self._cache_ref_count = self.n_cache_reuse
         else:
-            audio, mel, _filename = self.cached_wav
+            audio, mel, _filename = self.cached_wav[filename]
             assert _filename == filename
-            self._cache_ref_count -= 1
+            #self._cache_ref_count -= 1
 
         if not self.fine_tuning:
             assert (audio.size() == audio_flt.size())
