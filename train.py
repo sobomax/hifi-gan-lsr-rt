@@ -360,8 +360,13 @@ def train(rank, a, h):
                             #val_err_tot += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
                             if j <= 4:
-                                loss_per_band = torch.abs(y_mel[0] - y_g_hat_mel[0]).mean(dim=1)
-                                loss_per_band_np = loss_per_band.cpu().numpy()
+                                yghe_name = f'generated/y_hat_err_{j}'
+                                yghe_data = (y_mel[0] - y_g_hat_mel[0]).abs()
+                                print(yghe_data.size())
+                                yghe_data = yghe_data.squeeze(0).cpu().numpy()
+                                yghe_spec = plot_spectrogram(yghe_data)
+                                sw.add_figure(yghe_name, yghe_spec, steps)
+
                                 sw.add_text(f'input/filename_{j}', fn, steps)
                                 sw.add_audio(f'gt/y_{j}', y[0], steps, h.sampling_rate),
                                 sw.add_figure(f'gt/y_spec_{j}', plot_spectrogram(y_mel[0][0].cpu().numpy()),
