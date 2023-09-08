@@ -23,6 +23,7 @@ import multiprocessing
 from transformers import SpeechT5HifiGan, SpeechT5HifiGanConfig
 #torch.backends.cudnn.benchmark = True
 
+
 class MySpeechT5HifiGan(SpeechT5HifiGan):
     def __init__(self, h):
         st5conf = SpeechT5HifiGanConfig()
@@ -31,23 +32,27 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
     #    instance = super().from_pretrained("microsoft/speecht5_hifigan")
     #    return instance
 
-    def forward(self, x, debug=False, random_chunks=False):
+    def forward(self, x, debug=False, chunks=None):
         x = x.permute(0, 2, 1)
-        if not self.training and not random_chunks:
+        if not self.training and chunks is None:
             return super().forward(x)
         if debug:
             print(f'x.size = {x.size()}')
-        y = []
-        chunk_size = 2 ** int((torch.rand(1) * 4).round() + 1)
-        if debug:
-            print(chunk_size)
-        while x.size(1) > 0:
-            chunk = x[:, :chunk_size, :]
-            y.append(super().forward(chunk))
-            x = x[:, chunk_size:, :]
+        if chunks is None:
+            chunks = (32, 2, 4, 8, 16)
+        z = []
+        for chunk_size in chunks:
+            y = []
+            _x = x.clone()
             if debug:
-                print(f'y[0].size() = {y[0].size()}, x.size() = {x.size()}')
-        return torch.cat(y, dim=1)
+                print(chunk_size)
+            while _x.size(1) > 0:
+                chunk = _x[:, :chunk_size, :]
+                y.append(super().forward(chunk))
+                _x = _x[:, chunk_size:, :]
+            z.append(torch.cat(y, dim=1))
+        return z
+
 
 def train(rank, a, h):
     if a.device == 'xpu':
@@ -127,6 +132,7 @@ def train(rank, a, h):
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
 
     train_loader = DataLoader(trainset, num_workers=h.num_workers, shuffle=False,
+                              prefetch_factor=2,
                               sampler=train_sampler,
                               batch_size=h.batch_size,
                               pin_memory=True,
@@ -145,6 +151,7 @@ def train(rank, a, h):
                               base_mels_path=a.input_mels_dir)
         nw = min(1, h.num_workers)
         validation_loader = DataLoader(validset, num_workers=nw, shuffle=False,
+                                       prefetch_factor=2,
                                        sampler=None,
                                        batch_size=1,
                                        pin_memory=True,
@@ -161,7 +168,7 @@ def train(rank, a, h):
         msd.train()
 
     if a.focus_mels:
-        mel_weight = torch.linspace(1.0, 0.01, h.num_mels*4)
+        mel_weight = torch.linspace(1.0, 0.01, h.num_mels*1)
         mel_weight = mel_weight[None, :, None].to(device)
 
     for epoch in range(max(0, last_epoch), a.training_epochs):
@@ -176,18 +183,19 @@ def train(rank, a, h):
             if rank == 0:
                 start_b = time.time()
             x, y, fn, y_mel = batch
-            x = torch.autograd.Variable(x.to(device, non_blocking=True))
-            y = torch.autograd.Variable(y.to(device, non_blocking=True))
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
             if a.focus_mels:
                 #print(y_mel[0].size(), y_mel[1].size(), mel_weight.size())
                 y_mel[0] =  y_mel[0].to(device) * mel_weight
-            y_mel = [torch.autograd.Variable(ym.to(device, non_blocking=True)) for ym in y_mel]
+            y_mel = [ym.to(device, non_blocking=True) for ym in y_mel]
 
             y = y.unsqueeze(1)
 
-            y_g_hat = generator(x)
-            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*4, h.sampling_rate, h.hop_size, h.win_size,
+            y_g_hats = generator(x)
+            y_g_hat_mels = [mel_spectrogram(ygh.squeeze(1), h.n_fft, h.num_mels*1, h.sampling_rate, h.hop_size, h.win_size,
                                           h.fmin, h.fmax_for_loss, return_phase=True)
+                            for ygh in y_g_hats]
             if a.focus_mels:
                 y_g_hat_mel[0] = y_g_hat_mel[0] * mel_weight
 
@@ -216,8 +224,11 @@ def train(rank, a, h):
 
             # L1 Mel-Spectrogram Loss
 
-            loss_mel = F.l1_loss(y_mel[0], y_g_hat_mel[0]) * 45
-            assert not y_g_hat_mel[0].isnan().any() and not loss_mel.isnan().any()
+            y_mel_a = y_mel[0].repeat(len(y_g_hat_mels), 1, 1)
+            y_g_hat_mels_a = torch.cat([yghm[0] for yghm in y_g_hat_mels],
+                                           dim=0)
+            loss_mel = F.l1_loss(y_mel_a, y_g_hat_mels_a) / 12.7
+            assert not y_g_hat_mels[0][0].isnan().any() and not loss_mel.isnan().any()
             #print(f'y_g_hat_mel[0].size() = {y_g_hat_mel[0].size()}')
             #loss_mel += F.l1_loss(y_mel[1], y_g_hat_mel[1]) * 10
 
@@ -247,7 +258,7 @@ def train(rank, a, h):
                 stdur = time.time() - start_b
                 if steps % a.stdout_interval == 0:
                     with torch.no_grad():
-                        mel_error = F.l1_loss(y_mel[0], y_g_hat_mel[0]).item()
+                        mel_error = loss_mel.item()
                         #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
                     print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
@@ -289,10 +300,11 @@ def train(rank, a, h):
                         for j, batch in enumerate(validation_loader):
                             x, y, fn, y_mel = batch
                             fn = os.path.basename(fn[0])
-                            y_g_hat = generator(x.to(device), random_chunks=True)
-                            y_mel = [torch.autograd.Variable(ym.to(device, non_blocking=True))
+                            chunksz = min(2 ** j, 32)
+                            y_g_hat = generator(x.to(device), chunks=(chunksz,))[0]
+                            y_mel = [ym.to(device, non_blocking=True)
                                      for ym in y_mel]
-                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*4, h.sampling_rate,
+                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*1, h.sampling_rate,
                                                           h.hop_size, h.win_size,
                                                           h.fmin, h.fmax_for_loss, return_phase=True)
                             val_err_tot += F.l1_loss(y_mel[0], y_g_hat_mel[0]).item()
@@ -313,7 +325,7 @@ def train(rank, a, h):
                                 gx_data = x.squeeze(0).cpu().numpy()
                                 gx_spec = plot_spectrogram(gx_data)
                                 sw.add_figure(gx_name, gx_spec, steps)
-                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*4,
+                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*1,
                                                              h.sampling_rate, h.hop_size, h.win_size,
                                                              h.fmin, h.fmax)
                                 yhs_name = f'generated/y_hat_spec_{j}'

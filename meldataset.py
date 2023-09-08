@@ -282,7 +282,7 @@ class MelDataset(torch.utils.data.Dataset):
                 #mel = mel.to(self.device)
                 #audio = audio.to(self.device)
 
-        mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels*4,
+        mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels*1,
                                    self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
                                    center=False, return_phase=True)
         #print(mel.size())#, mel.device, mel_loss.size(), mel_loss.device)
