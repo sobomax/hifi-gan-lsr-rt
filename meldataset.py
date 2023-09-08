@@ -84,9 +84,9 @@ class mel_spec_options:
 
 
 def mel_spectrogram(y, o: mel_spec_options):
-    if torch.min(y) < -1.:
+    if torch.min(y) < -1.0001:
         print('min value is ', torch.min(y))
-    if torch.max(y) > 1.:
+    if torch.max(y) > 1.0001:
         print('max value is ', torch.max(y))
         global _nclamps
         assert y.max() < 1.1 and _nclamps < nclamps_MAX
@@ -176,9 +176,9 @@ class MelDataset(torch.utils.data.Dataset):
         self.mso_loss = mso_loss
 
 
-    def getMelRef(self, audio_in, filename):
-        fn_hash = hash_filename(f'v2-{filename}')
-        o_fn_hash = hash_filename(f'v1-{filename}')
+    def getMelRef(self, audio_in, filename, cachetag):
+        fn_hash = hash_filename(f'v3-{filename}-{cachetag}')
+        o_fn_hash = hash_filename(f'v2-{filename}')
         for i, _fn_hash in enumerate((fn_hash, o_fn_hash)):
             #if 'LJ050-02' in filename:
             #    break
@@ -199,7 +199,7 @@ class MelDataset(torch.utils.data.Dataset):
                 return (audios, mels)
         mels_cp = os.path.join(self.cache_dir, f"{fn_hash}.mel.pt")
         audios_cp = os.path.join(self.cache_dir, f"{fn_hash}.audio.pt")
-        print(f'getMelRef({filename}, {audio_in.size()}')
+        print(f'running: getMelRef({filename}[{cachetag}], {audio_in.size()}')
 
         if self.processor is None:
             self.processor = ST5P.from_pretrained("microsoft/speecht5_vc")
@@ -233,18 +233,24 @@ class MelDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         #assert not self.split
         filename = self.audio_files[index]
-        if not filename in self.cached_wav:
+        norm_wav = not self.fine_tuning
+        ctag = (filename, norm_wav)
+        if not ctag in self.cached_wav:
             #print(f'cache miss {filename}, cache_len={len(self.cached_wav.keys())}')
-            audio, audio_flt, sampling_rate = load_wav(filename, not self.fine_tuning)
+            audio, audio_flt, sampling_rate = load_wav(filename, norm_wav)
             if self.fine_tuning:
-                audio, mel = self.getMelRef(audio, filename)
-            self.cached_wav[filename] = (audio, mel, filename)
+                if norm_wav:
+                    am_cache_tag = 'normalized'
+                else:
+                    am_cache_tag = 'orig'
+                audio, mel = self.getMelRef(audio, filename, am_cache_tag)
+            self.cached_wav[ctag] = (audio, mel, filename)
             if sampling_rate != self.sampling_rate:
                 raise ValueError("{} SR doesn't match target {} SR".format(
                     sampling_rate, self.sampling_rate))
             self._cache_ref_count = self.n_cache_reuse
         else:
-            audio, mel, _filename = self.cached_wav[filename]
+            audio, mel, _filename = self.cached_wav[ctag]
             assert _filename == filename
             #self._cache_ref_count -= 1
 
