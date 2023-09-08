@@ -172,7 +172,7 @@ def train(rank, a, h):
                               prefetch_factor=2,
                               sampler=train_sampler,
                               batch_size=h.batch_size,
-                              pin_memory=True,
+                              pin_memory=a.pin_memory,
                               drop_last=True,
                               persistent_workers=True if h.num_workers > 0 else False)
 
@@ -191,7 +191,7 @@ def train(rank, a, h):
                                        prefetch_factor=2,
                                        sampler=None,
                                        batch_size=1,
-                                       pin_memory=True,
+                                       pin_memory=a.pin_memory,
                                        drop_last=True,
                                        persistent_workers=True if nw > 0 else False)
 
@@ -413,6 +413,7 @@ def main():
     parser.add_argument('--precompute_mels', default=False, type=bool)
     parser.add_argument('--focus_mels', default=False, type=bool)
     parser.add_argument('--device', default='cuda')
+    parser.add_argument('--pin_memory', default=True, type=bool)
     parser.add_argument('--mel_oversample', default=1, type=int)
 
     a = parser.parse_args()
