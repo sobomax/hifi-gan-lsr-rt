@@ -183,12 +183,12 @@ def train(rank, a, h):
             if rank == 0:
                 start_b = time.time()
             x, y, fn, y_mel = batch
-            x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
+            x = x.to(device)
+            y = y.to(device)
+            y_mel[0] = y_mel[0].to(device)
             if a.focus_mels:
                 #print(y_mel[0].size(), y_mel[1].size(), mel_weight.size())
-                y_mel[0] =  y_mel[0].to(device) * mel_weight
-            y_mel = [ym.to(device, non_blocking=True) for ym in y_mel]
+                y_mel[0] *=  mel_weight
 
             y = y.unsqueeze(1)
 
@@ -302,8 +302,7 @@ def train(rank, a, h):
                             fn = os.path.basename(fn[0])
                             chunksz = min(2 ** j, 32)
                             y_g_hat = generator(x.to(device), chunks=(chunksz,))[0]
-                            y_mel = [ym.to(device, non_blocking=True)
-                                     for ym in y_mel]
+                            y_mel[0] = y_mel[0].to(device)
                             y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*1, h.sampling_rate,
                                                           h.hop_size, h.win_size,
                                                           h.fmin, h.fmax_for_loss, return_phase=True)
