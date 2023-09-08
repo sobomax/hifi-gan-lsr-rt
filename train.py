@@ -14,7 +14,8 @@ import torch.multiprocessing as mp
 from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel
 from env import AttrDict, build_env
-from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist
+from meldataset import MelDataset, mel_spectrogram, mel_spec_options, \
+        get_dataset_filelist
 from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
     discriminator_loss
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
@@ -52,6 +53,25 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
                 _x = _x[:, chunk_size:, :]
             z.append(torch.cat(y, dim=1))
         return z
+
+
+class MyMSO(mel_spec_options):
+    def __init__(self, h, a):
+        super().__init__()
+        self.n_fft = h.n_fft
+        self.num_mels = h.num_mels * a.mel_oversample
+        self.sampling_rate = h.sampling_rate
+        self.hop_size = h.hop_size
+        self.win_size = h.win_size
+        self.fmin = h.fmin
+        self.fmax = h.fmax
+
+
+class TrainingMSO(MyMSO):
+    def __init__(self, h, a):
+        super().__init__(h, a)
+        self.fmax = h.fmax_for_loss
+        self.return_phase = True
 
 
 def train(rank, a, h):
@@ -124,9 +144,11 @@ def train(rank, a, h):
 
     training_filelist, validation_filelist = get_dataset_filelist(a)
 
-    trainset = MelDataset(training_filelist, h.segment_size, h.n_fft, h.num_mels,
-                          h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=1024,
-                          shuffle=False if h.num_gpus > 1 else True, fmax_loss=h.fmax_for_loss, device=device,
+    mso_ref = MyMSO(h, a)
+    mso_loss = TrainingMSO(h, a)
+    trainset = MelDataset(training_filelist, h.segment_size, h.hop_size, h.sampling_rate,
+                          mso_ref, mso_loss, n_cache_reuse=1024,
+                          shuffle=False if h.num_gpus > 1 else True, device=device,
                           fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
 
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
@@ -145,10 +167,10 @@ def train(rank, a, h):
         exit(0)
 
     if rank == 0:
-        validset = MelDataset(validation_filelist, h.segment_size, h.n_fft, h.num_mels,
-                              h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=1024,
-                              fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
-                              base_mels_path=a.input_mels_dir)
+        validset = MelDataset(validation_filelist, h.segment_size, h.hop_size, h.sampling_rate,
+                                mso_ref, mso_loss, split=False, shuffle=False, n_cache_reuse=1024,
+                                device=device, fine_tuning=a.fine_tuning,
+                                base_mels_path=a.input_mels_dir)
         nw = min(1, h.num_workers)
         validation_loader = DataLoader(validset, num_workers=nw, shuffle=False,
                                        prefetch_factor=2,
@@ -193,8 +215,7 @@ def train(rank, a, h):
             y = y.unsqueeze(1)
 
             y_g_hats = generator(x)
-            y_g_hat_mels = [mel_spectrogram(ygh.squeeze(1), h.n_fft, h.num_mels*1, h.sampling_rate, h.hop_size, h.win_size,
-                                          h.fmin, h.fmax_for_loss, return_phase=True)
+            y_g_hat_mels = [mel_spectrogram(ygh.squeeze(1), mso_loss)
                             for ygh in y_g_hats]
             if a.focus_mels:
                 y_g_hat_mel[0] = y_g_hat_mel[0] * mel_weight
@@ -303,9 +324,7 @@ def train(rank, a, h):
                             chunksz = min(2 ** j, 32)
                             y_g_hat = generator(x.to(device), chunks=(chunksz,))[0]
                             y_mel[0] = y_mel[0].to(device)
-                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*1, h.sampling_rate,
-                                                          h.hop_size, h.win_size,
-                                                          h.fmin, h.fmax_for_loss, return_phase=True)
+                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), mso_loss)
                             val_err_tot += F.l1_loss(y_mel[0], y_g_hat_mel[0]).item()
 
                             #val_err_tot += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
@@ -324,9 +343,9 @@ def train(rank, a, h):
                                 gx_data = x.squeeze(0).cpu().numpy()
                                 gx_spec = plot_spectrogram(gx_data)
                                 sw.add_figure(gx_name, gx_spec, steps)
-                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels*1,
-                                                             h.sampling_rate, h.hop_size, h.win_size,
-                                                             h.fmin, h.fmax)
+                                mso = MyMSO(h, a)
+                                mso.return_phase = False
+                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), mso)
                                 yhs_name = f'generated/y_hat_spec_{j}'
                                 yhs_data = y_hat_spec.squeeze(0).cpu().numpy()
                                 yhs_spec = plot_spectrogram(yhs_data)
@@ -371,6 +390,7 @@ def main():
     parser.add_argument('--precompute_mels', default=False, type=bool)
     parser.add_argument('--focus_mels', default=False, type=bool)
     parser.add_argument('--device', default='cuda')
+    parser.add_argument('--mel_oversample', default=1, type=int)
 
     a = parser.parse_args()
 

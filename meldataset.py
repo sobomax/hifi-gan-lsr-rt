@@ -71,9 +71,19 @@ hann_window = {}
 nclamps_MAX = 10
 _nclamps = 0
 
+class mel_spec_options:
+    n_fft: int
+    num_mels: int
+    sampling_rate: int
+    hop_size: int
+    win_size: int
+    fmin = None
+    fmax = None
+    center = False
+    return_phase = False
 
-def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax,
-                    center=False, return_phase=False):
+
+def mel_spectrogram(y, o: mel_spec_options):
     if torch.min(y) < -1.:
         print('min value is ', torch.min(y))
     if torch.max(y) > 1.:
@@ -84,17 +94,17 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
         y = y.clamp(max=1.)
 
     global mel_basis, hann_window
-    if fmax not in mel_basis:
-        mel = librosa_mel_fn(sampling_rate, n_fft, num_mels, fmin, fmax)
-        mel_basis[str(fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
-        hann_window[str(y.device)] = torch.hann_window(win_size).to(y.device)
+    if o.fmax not in mel_basis:
+        mel = librosa_mel_fn(o.sampling_rate, o.n_fft, o.num_mels, o.fmin, o.fmax)
+        mel_basis[str(o.fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+        hann_window[str(y.device)] = torch.hann_window(o.win_size).to(y.device)
 
-    y = F.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+    y = F.pad(y.unsqueeze(1), (int((o.n_fft-o.hop_size)/2), int((o.n_fft-o.hop_size)/2)), mode='reflect')
     y = y.squeeze(1)
-    spec = torch.stft(y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window[str(y.device)],
-                      center=center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
+    spec = torch.stft(y, o.n_fft, hop_length=o.hop_size, win_length=o.win_size, window=hann_window[str(y.device)],
+                      center=o.center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
     spec = torch.view_as_real(spec)
-    if not return_phase:
+    if not o.return_phase:
         specs = [torch.sqrt(spec.pow(2).sum(-1)+(1e-9)),]
     else:
         amplitude = torch.sqrt(spec[..., 0]**2 + spec[..., 1]**2 + (1e-9))
@@ -106,10 +116,10 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
         #print(f'amplitude.size() = {amplitude.size()}')
         #print(f'phase.size() = {phase.size()}')
 
-    specs[0] = torch.matmul(mel_basis[str(fmax)+'_'+str(y.device)], specs[0])
+    specs[0] = torch.matmul(mel_basis[str(o.fmax)+'_'+str(y.device)], specs[0])
     specs[0] = spectral_normalize_torch(specs[0])
 
-    if not return_phase:
+    if not o.return_phase:
         specs = specs[0]
 
     return specs
@@ -142,9 +152,12 @@ def hash_filename(filename):
 class MelDataset(torch.utils.data.Dataset):
     cache_dir = os.path.expanduser('~/.cache/hifi-gan')
     processor = None
-    def __init__(self, training_files, segment_size, n_fft, num_mels,
-                 hop_size, win_size, sampling_rate,  fmin, fmax, split=True, shuffle=True, n_cache_reuse=1,
-                 device=None, fmax_loss=None, fine_tuning=False, base_mels_path=None):
+    mso_ref: mel_spec_options
+    mso_loss: mel_spec_options
+    def __init__(self, training_files, segment_size, hop_size, sampling_rate,
+                 mso_ref: mel_spec_options, mso_loss: mel_spec_options,
+                 split=True, shuffle=True, n_cache_reuse=1,
+                 device=None, fine_tuning=False, base_mels_path=None):
         self.audio_files = training_files
         random.seed(1234)
         if shuffle:
@@ -152,25 +165,23 @@ class MelDataset(torch.utils.data.Dataset):
         self.segment_size = segment_size
         self.sampling_rate = sampling_rate
         self.split = split
-        self.n_fft = n_fft
-        self.num_mels = num_mels
         self.hop_size = hop_size
-        self.win_size = win_size
-        self.fmin = fmin
-        self.fmax = fmax
-        self.fmax_loss = fmax_loss
         self.cached_wav = {}
         self.n_cache_reuse = n_cache_reuse
         self._cache_ref_count = 0
         self.device = device
         self.fine_tuning = fine_tuning
         self.base_mels_path = base_mels_path
+        self.mso_ref = mso_ref
+        self.mso_loss = mso_loss
 
 
     def getMelRef(self, audio_in, filename):
         fn_hash = hash_filename(f'v2-{filename}')
         o_fn_hash = hash_filename(f'v1-{filename}')
         for i, _fn_hash in enumerate((fn_hash, o_fn_hash)):
+            #if 'LJ050-02' in filename:
+            #    break
             mels_cp = os.path.join(self.cache_dir, f"{_fn_hash}.mel.pt")
             audios_cp = os.path.join(self.cache_dir, f"{_fn_hash}.audio.pt")
             if os.path.exists(mels_cp) and os.path.exists(audios_cp):
@@ -253,9 +264,7 @@ class MelDataset(torch.utils.data.Dataset):
                     audio = F.pad(audio, pad_size, 'constant')
                     #audio_flt = F.pad(audio_flt, pad_size, 'constant')
 
-            mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
-                                  self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
-                                  center=False)
+            mel = mel_spectrogram(audio, self.mso_ref)
         else:
             #mel = np.load(
             #    os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + '.npy'))
@@ -282,9 +291,7 @@ class MelDataset(torch.utils.data.Dataset):
                 #mel = mel.to(self.device)
                 #audio = audio.to(self.device)
 
-        mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels*1,
-                                   self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
-                                   center=False, return_phase=True)
+        mel_loss = mel_spectrogram(audio, self.mso_loss)
         #print(mel.size())#, mel.device, mel_loss.size(), mel_loss.device)
         #raise Exception("BP")
         return (mel.squeeze(), audio.squeeze(0), filename,
