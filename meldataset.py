@@ -97,7 +97,7 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
     if not return_phase:
         specs = [torch.sqrt(spec.pow(2).sum(-1)+(1e-9)),]
     else:
-        amplitude = torch.sqrt(spec[..., 0]**2 + spec[..., 1]**2)
+        amplitude = torch.sqrt(spec[..., 0]**2 + spec[..., 1]**2 + (1e-9))
         phase = torch.atan2(spec[..., 1], spec[..., 0])
         # Normalize
         phase = (phase + torch.tensor(math.pi)) / (2 * torch.tensor(math.pi))
