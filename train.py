@@ -334,6 +334,10 @@ def train(rank, a, h):
                     sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
                     sw.add_scalar("training/mel_spec_error", mel_error, steps)
                     sw.add_scalar("training/secs_per_batch", stdur, steps)
+                    for i, param_group in enumerate(optim_g.param_groups):
+                        sw.add_scalar(f"training/optim_g_lr_{i}",
+                                      param_group['lr'], steps)
+                    sw.flush()
 
                 # Validation
                 if steps % a.validation_interval == 0:  # and steps != 0:
@@ -376,6 +380,8 @@ def train(rank, a, h):
 
                         val_err = val_err_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
+                        print(f'Validation error: {val_err}')
+                    sw.flush()
 
                     generator.train()
 
@@ -389,6 +395,7 @@ def train(rank, a, h):
             epdur = time.time() - start
             sw.add_scalar("training/secs_per_epoch", epdur, epoch)
             print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(epdur)))
+            sw.flush()
 
 
 def main():
