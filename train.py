@@ -104,14 +104,20 @@ def train(rank, a, h):
         cp_do = scan_checkpoint(a.checkpoint_path, 'do_')
 
     steps = 0
-    if cp_g is None or cp_do is None:
-        state_dict_do = None
+    last_epoch = -1
+    if cp_g is None:
+        state_dict_g = None
         generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
-        last_epoch = -1
     else:
         state_dict_g = load_checkpoint(cp_g, device)
-        state_dict_do = load_checkpoint(cp_do, device)
         generator.load_state_dict(state_dict_g['generator'])
+        del state_dict_g['generator']
+        steps = state_dict_g['steps'] + 1
+        last_epoch = state_dict_g['epoch']
+    if cp_do is None:
+        state_dict_do = None
+    else:
+        state_dict_do = load_checkpoint(cp_do, device)
         #generator = torch.compile(generator
         if mpd:
             mpd.load_state_dict(state_dict_do['mpd'])
@@ -134,9 +140,11 @@ def train(rank, a, h):
                                 h.learning_rate, betas=[h.adam_b1, h.adam_b2])
 
     if state_dict_do is not None:
+        optim_d.load_state_dict(state_dict_do['optim_d'])
         optim_g.load_state_dict(state_dict_do['optim_g'])
-        if mpd:
-            optim_d.load_state_dict(state_dict_do['optim_d'])
+    elif state_dict_g is not None:
+        optim_g.load_state_dict(state_dict_g['optim_g'])
+        del state_dict_g['optim_g']
 
     scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
     if mpd:
@@ -193,6 +201,7 @@ def train(rank, a, h):
         mel_weight = torch.linspace(1.0, 0.01, h.num_mels*1)
         mel_weight = mel_weight[None, :, None].to(device)
 
+    generator, optim_g = ipex.optimize(model=generator, optimizer=optim_g)
     for epoch in range(max(0, last_epoch), a.training_epochs):
         if rank == 0:
             start = time.time()
@@ -288,23 +297,30 @@ def train(rank, a, h):
                 # checkpointing
                 if steps % a.checkpoint_interval == 0 and steps != 0:
                     checkpoint_path = "{}/g_{:08d}".format(a.checkpoint_path, steps)
-                    save_checkpoint(checkpoint_path,
-                                    {'generator': (generator.module if h.num_gpus > 1 else generator).state_dict()})
-                    checkpoint_path = "{}/do_{:08d}".format(a.checkpoint_path, steps)
-                    cp_data = {}
-                    if mpd:
-                        mpd_s = (mpd.module if h.num_gpus > 1
-                                 else mpd).state_dict()
-                        cp_data['mpd'] = mpd_s
-                        cp_data['optim_d'] = optim_d.state_dict()
-                    if msd:
-                        cp_data['msd'] = (msd.module if h.num_gpus > 1
-                                      else msd).state_dict()
-                    cp_data['optim_g'] = optim_g.state_dict()
-                    cp_data['steps'] = steps
-                    cp_data['epoch'] = epoch
-
+                    cp_data = {'generator': (generator.module
+                                             if h.num_gpus > 1 else generator).state_dict()}
+                    if mpd is None:
+                        cp_data['optim_g'] = optim_g.state_dict()
+                        cp_data['steps'] = steps
+                        cp_data['epoch'] = epoch
                     save_checkpoint(checkpoint_path, cp_data)
+                    if mpd is not None or msd is not None:
+                        checkpoint_path = "{}/do_{:08d}".format(a.checkpoint_path, steps)
+                        cp_data = {}
+                        if mpd:
+                            mpd_s = (mpd.module if h.num_gpus > 1
+                                     else mpd).state_dict()
+                            cp_data['mpd'] = mpd_s
+                            cp_data['optim_d'] = optim_d.state_dict()
+                        if msd:
+                            cp_data['msd'] = (msd.module if h.num_gpus > 1
+                                      else msd).state_dict()
+                        cp_data['optim_g'] = optim_g.state_dict()
+                        cp_data['steps'] = steps
+                        cp_data['epoch'] = epoch
+
+                        save_checkpoint(checkpoint_path, cp_data)
+                    del cp_data
 
                 # Tensorboard summary logging
                 if steps % a.summary_interval == 0:
