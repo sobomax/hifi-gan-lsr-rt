@@ -28,6 +28,7 @@ import multiprocessing
 from transformers import SpeechT5HifiGan, SpeechT5HifiGanConfig
 #torch.backends.cudnn.benchmark = True
 
+debug_m = False
 
 class MySpeechT5HifiGan(SpeechT5HifiGan):
     def __init__(self, h):
@@ -170,7 +171,8 @@ def train(rank, a, h):
 
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
 
-    train_loader = DataLoader(trainset, num_workers=h.num_workers, shuffle=False,
+    train_loader = DataLoader(trainset, num_workers=h.num_workers,
+                              shuffle=a.shuffle_input,
                               prefetch_factor=2,
                               sampler=train_sampler,
                               batch_size=h.batch_size,
@@ -266,8 +268,14 @@ def train(rank, a, h):
 
             y_mel_a = y_mel[0].repeat(len(y_g_hat_mels), 1, 1)
             y_g_hat_mels_a = torch.cat([yghm[0] for yghm in y_g_hat_mels],
-                                           dim=0)
-            loss_mel = F.l1_loss(y_mel_a, y_g_hat_mels_a) / 12.7
+                                       dim=0)
+            if debug_m:
+                print(y_mel_a.size(), y_g_hat_mels_a.size())
+            loss_mel = F.l1_loss(y_mel_a, y_g_hat_mels_a,
+                                 reduction='sum') / y_mel_a.numel()
+            if debug_m:
+                print(loss_mel)
+
             assert not y_g_hat_mels[0][0].isnan().any() and not loss_mel.isnan().any()
             #print(f'y_g_hat_mel[0].size() = {y_g_hat_mel[0].size()}')
             #loss_mel += F.l1_loss(y_mel[1], y_g_hat_mel[1]) * 10
@@ -301,7 +309,8 @@ def train(rank, a, h):
                         mel_error = loss_mel.item()
                         #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
-                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
+                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, ' \
+                            'Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
                           format(steps, loss_gen_all, mel_error, stdur))
 
                 # checkpointing
@@ -336,7 +345,7 @@ def train(rank, a, h):
                 if steps % a.summary_interval == 0:
                     sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
                     sw.add_scalar("training/mel_spec_error", mel_error, steps)
-                    sw.add_scalar("training/secs_per_batch", stdur, steps)
+                    sw.add_scalar("performance/secs_per_batch", stdur, steps)
                     for i, param_group in enumerate(optim_g.param_groups):
                         sw.add_scalar(f"training/optim_g_lr_{i}",
                                       param_group['lr'], steps)
@@ -355,14 +364,18 @@ def train(rank, a, h):
                             y_g_hat = generator(x.to(device), chunks=(chunksz,))[0]
                             y_mel[0] = y_mel[0].to(device)
                             y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), mso_loss)
-                            val_err_tot += F.l1_loss(y_mel[0], y_g_hat_mel[0]).item()
+                            vet_inc = F.l1_loss(y_mel[0], y_g_hat_mel[0],
+                                                reduction='sum') / y_mel[0].numel()
+                            vet_inc = vet_inc.item()
+                            val_err_tot += vet_inc
 
                             #val_err_tot += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
                             if j <= 4:
                                 yghe_name = f'generated/y_hat_err_{j}'
                                 yghe_data = (y_mel[0] - y_g_hat_mel[0]).abs()
-                                print(yghe_data.size())
+                                if debug_m:
+                                    print(yghe_data.size())
                                 yghe_data = yghe_data.squeeze(0).cpu().numpy()
                                 yghe_spec = plot_spectrogram(yghe_data)
                                 sw.add_figure(yghe_name, yghe_spec, steps)
@@ -388,7 +401,7 @@ def train(rank, a, h):
 
                         val_err = val_err_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
-                        print(f'Validation error: {val_err}')
+                        print(f'Validation error: {val_err:4.3f}')
                     sw.flush()
 
                     generator.train()
@@ -401,7 +414,7 @@ def train(rank, a, h):
         
         if rank == 0:
             epdur = time.time() - start
-            sw.add_scalar("training/secs_per_epoch", epdur, epoch)
+            sw.add_scalar("performance/secs_per_epoch", epdur, epoch)
             print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(epdur)))
             sw.flush()
 
@@ -430,6 +443,7 @@ def main():
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--pin_memory', default=True, type=bool)
     parser.add_argument('--mel_oversample', default=1, type=int)
+    parser.add_argument('--shuffle_input', default=True, type=bool)
 
     a = parser.parse_args()
 
@@ -453,7 +467,7 @@ def main():
     if h.num_gpus > 1:
         mp.spawn(train, nprocs=h.num_gpus, args=(a, h,))
     else:
-        #multiprocessing.set_start_method('spawn', force=True)
+        multiprocessing.set_start_method('spawn', force=True)
         train(0, a, h)
 
 
