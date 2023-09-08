@@ -82,7 +82,14 @@ def train(rank, a, h):
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
 
     torch.manual_seed(h.seed)
-    device = torch.device(f'{a.device}:{rank}' if rank == 0 else 'cpu')
+    if rank == 0 and a.device != 'cpu':
+        if not ':' in a.device:
+            devname = f'{a.device}:{rank}'
+        else:
+            devname = a.device
+    else:
+        devname = 'cpu'
+    device = torch.device(devname)
 
     #generator = Generator(h).to(device)
     #generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
