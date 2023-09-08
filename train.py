@@ -1,6 +1,10 @@
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+try:
+    import intel_extension_for_pytorch as ipex
+except ModuleNotFoundError:
+    ipex = None
 import itertools
 import os
 import time
@@ -75,8 +79,6 @@ class TrainingMSO(MyMSO):
 
 
 def train(rank, a, h):
-    if a.device == 'xpu':
-        import intel_extension_for_pytorch as ipex
     if h.num_gpus > 1:
         init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
@@ -208,7 +210,8 @@ def train(rank, a, h):
         mel_weight = torch.linspace(1.0, 0.01, h.num_mels*1)
         mel_weight = mel_weight[None, :, None].to(device)
 
-    generator, optim_g = ipex.optimize(model=generator, optimizer=optim_g)
+    if ipex is not None:
+        generator, optim_g = ipex.optimize(model=generator, optimizer=optim_g)
     for epoch in range(max(0, last_epoch), a.training_epochs):
         if rank == 0:
             start = time.time()
