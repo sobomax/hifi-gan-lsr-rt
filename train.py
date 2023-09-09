@@ -23,6 +23,7 @@ from meldataset import MelDataset, mel_spectrogram, mel_spec_options, \
 from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
     discriminator_loss
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
+from matplotlib.colors import LogNorm
 
 import multiprocessing
 from transformers import SpeechT5HifiGan, SpeechT5HifiGanConfig
@@ -33,7 +34,7 @@ debug_m = False
 class MySpeechT5HifiGan(SpeechT5HifiGan):
     pre_frames = 2
     _frame_size = 256 # Fixme
-    def __init__(self, h):
+    def __init__(self, h=None):
         st5conf = SpeechT5HifiGanConfig()
         return super().__init__(st5conf)
     #def __new__(cls, *args, **kwargs):
@@ -427,7 +428,8 @@ def train(rank, a, h):
                             yghe_spec = plot_spectrogram(yghe_data.cpu().numpy(),
                                                          vmin=min_yghe_value,
                                                          vmax=max_yghe_value,
-                                                         cmap='plasma')
+                                                         cmap='plasma',
+                                                         norm=LogNorm())
                             sw.add_figure(yghe_name, yghe_spec, steps)
 
                         val_err = val_err_tot / (j+1)
