@@ -7,10 +7,11 @@ matplotlib.use("Agg")
 import matplotlib.pylab as plt
 
 
-def plot_spectrogram(spectrogram):
+def plot_spectrogram(spectrogram, *im_a, **im_kw):
     fig, ax = plt.subplots(figsize=(10, 2))
     im = ax.imshow(spectrogram, aspect="auto", origin="lower",
-                   interpolation='none')
+                   interpolation='none',
+                   *im_a, **im_kw)
     plt.colorbar(im, ax=ax)
 
     fig.canvas.draw()
