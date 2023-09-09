@@ -31,6 +31,8 @@ from transformers import SpeechT5HifiGan, SpeechT5HifiGanConfig
 debug_m = False
 
 class MySpeechT5HifiGan(SpeechT5HifiGan):
+    pre_frames = 2
+    _frame_size = 256 # Fixme
     def __init__(self, h):
         st5conf = SpeechT5HifiGanConfig()
         return super().__init__(st5conf)
@@ -39,9 +41,17 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
     #    return instance
 
     def forward(self, x, debug=False, chunks=None):
+        if debug:
+            print(f'MySpeechT5HifiGan.forward(x.size = {x.size()})')
         x = x.permute(0, 2, 1)
+        pfs = torch.zeros(x.size(0), self.pre_frames, x.size(2),
+                          device=x.device)
+        x = torch.cat((pfs, x), dim=1)
+        y_trim = self.pre_frames * self._frame_size
         if not self.training and chunks is None:
-            return super().forward(x)
+            y = super().forward(x)
+            y_trim = self.pre_frames * self._frame_size
+            return y[:, y_trim:]
         if debug:
             print(f'x.size = {x.size()}')
         if chunks is None:
@@ -52,9 +62,9 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
             _x = x.clone()
             if debug:
                 print(chunk_size)
-            while _x.size(1) > 0:
-                chunk = _x[:, :chunk_size, :]
-                y.append(super().forward(chunk))
+            while _x.size(1) > self.pre_frames:
+                chunk = _x[:, :chunk_size+self.pre_frames, :]
+                y.append(super().forward(chunk)[:, y_trim:])
                 _x = _x[:, chunk_size:, :]
             z.append(torch.cat(y, dim=1))
         return z
@@ -115,6 +125,8 @@ def train(rank, a, h):
 
     steps = 0
     last_epoch = -1
+    min_yghe_value = None
+    max_yghe_value = None
     if cp_g is None:
         state_dict_g = None
         generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
@@ -124,6 +136,8 @@ def train(rank, a, h):
         del state_dict_g['generator']
         steps = state_dict_g['steps'] + 1
         last_epoch = state_dict_g['epoch']
+        min_yghe_value = state_dict_g['min_yghe_value']
+        max_yghe_value = state_dict_g['max_yghe_value']
     if cp_do is None:
         state_dict_do = None
     else:
@@ -317,7 +331,10 @@ def train(rank, a, h):
                 if steps % a.checkpoint_interval == 0 and steps != 0:
                     checkpoint_path = "{}/g_{:08d}".format(a.checkpoint_path, steps)
                     cp_data = {'generator': (generator.module
-                                             if h.num_gpus > 1 else generator).state_dict()}
+                                             if h.num_gpus > 1
+                                             else generator).state_dict(),
+                               'min_yghe_value': min_yghe_value,
+                               'max_yghe_value': max_yghe_value}
                     if mpd is None:
                         cp_data['optim_g'] = optim_g.state_dict()
                         cp_data['steps'] = steps
@@ -357,6 +374,7 @@ def train(rank, a, h):
                     #torch.cuda.empty_cache()
                     val_err_tot = 0
                     with torch.no_grad():
+                        yghes = []
                         for j, batch in enumerate(validation_loader):
                             x, y, fn, y_mel = batch
                             fn = os.path.basename(fn[0])
@@ -376,9 +394,8 @@ def train(rank, a, h):
                                 yghe_data = (y_mel[0] - y_g_hat_mel[0]).abs()
                                 if debug_m:
                                     print(yghe_data.size())
-                                yghe_data = yghe_data.squeeze(0).cpu().numpy()
-                                yghe_spec = plot_spectrogram(yghe_data)
-                                sw.add_figure(yghe_name, yghe_spec, steps)
+                                yghe_data = yghe_data.squeeze(0)
+                                yghes.append((yghe_name, yghe_data))
 
                                 sw.add_text(f'input/filename_{j}', fn, steps)
                                 sw.add_audio(f'gt/y_{j}', y[0], steps, h.sampling_rate),
@@ -398,6 +415,17 @@ def train(rank, a, h):
                                 yhs_data = y_hat_spec.squeeze(0).cpu().numpy()
                                 yhs_spec = plot_spectrogram(yhs_data)
                                 sw.add_figure(yhs_name, yhs_spec, steps)
+                        if min_yghe_value is None:
+                            min_yghe_value = min([data[1].min() for data in yghes])
+                        if max_yghe_value is None:
+                            max_yghe_value = max([data[1].max() for data in yghes])
+                        for j, yghe in enumerate(yghes):
+                            yghe_name, yghe_data = yghe
+                            yghe_spec = plot_spectrogram(yghe_data,
+                                                         vmin=min_value,
+                                                         vmax=max_value,
+                                                         cmap='plasma')
+                            sw.add_figure(yghe_name, yghe_spec, steps)
 
                         val_err = val_err_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
