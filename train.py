@@ -216,6 +216,7 @@ def train(rank, a, h):
         sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
 
     #torch.autograd.set_detect_anomaly(True)
+    torch.cuda.empty_cache()
     generator.train()
     if mpd:
         mpd.train()
@@ -371,7 +372,7 @@ def train(rank, a, h):
                 # Validation
                 if steps % a.validation_interval == 0:  # and steps != 0:
                     generator.eval()
-                    #torch.cuda.empty_cache()
+                    torch.cuda.empty_cache()
                     val_err_tot = 0
                     with torch.no_grad():
                         yghes = []
@@ -416,14 +417,16 @@ def train(rank, a, h):
                                 yhs_spec = plot_spectrogram(yhs_data)
                                 sw.add_figure(yhs_name, yhs_spec, steps)
                         if min_yghe_value is None:
-                            min_yghe_value = min([data[1].min() for data in yghes])
+                            min_yghe_value = min([data[1].min().cpu().numpy()
+                                for data in yghes])
                         if max_yghe_value is None:
-                            max_yghe_value = max([data[1].max() for data in yghes])
+                            max_yghe_value = max([data[1].max().cpu().numpy()
+                                for data in yghes])
                         for j, yghe in enumerate(yghes):
                             yghe_name, yghe_data = yghe
-                            yghe_spec = plot_spectrogram(yghe_data,
-                                                         vmin=min_value,
-                                                         vmax=max_value,
+                            yghe_spec = plot_spectrogram(yghe_data.cpu().numpy(),
+                                                         vmin=min_yghe_value,
+                                                         vmax=max_yghe_value,
                                                          cmap='plasma')
                             sw.add_figure(yghe_name, yghe_spec, steps)
 
@@ -495,7 +498,7 @@ def main():
     if h.num_gpus > 1:
         mp.spawn(train, nprocs=h.num_gpus, args=(a, h,))
     else:
-        multiprocessing.set_start_method('spawn', force=True)
+        #multiprocessing.set_start_method('spawn', force=True)
         train(0, a, h)
 
 
