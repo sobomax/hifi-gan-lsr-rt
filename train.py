@@ -32,7 +32,6 @@ from transformers import SpeechT5HifiGan, SpeechT5HifiGanConfig
 debug_m = False
 
 class MySpeechT5HifiGan(SpeechT5HifiGan):
-    pre_frames = 2
     _frame_size = 256 # Fixme
     def __init__(self, h=None):
         st5conf = SpeechT5HifiGanConfig()
@@ -42,29 +41,27 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
     #    return instance
 
     def forward(self, x, debug=False, chunks=None):
+        #debug=True
         if debug:
             print(f'MySpeechT5HifiGan.forward(x.size = {x.size()})')
         x = x.permute(0, 2, 1)
-        pfs = torch.zeros(x.size(0), self.pre_frames, x.size(2),
-                          device=x.device)
-        x = torch.cat((pfs, x), dim=1)
-        y_trim = self.pre_frames * self._frame_size
         if not self.training and chunks is None:
-            y = super().forward(x)
-            y_trim = self.pre_frames * self._frame_size
-            return y[:, y_trim:]
+            return super().forward(x)
         if debug:
             print(f'x.size = {x.size()}')
         if chunks is None:
             chunks = (32, 2, 4, 8, 16)
         z = []
         for chunk_size in chunks:
+            pfs = torch.zeros(x.size(0), chunk_size, x.size(2),
+                    device=x.device)
+            _x = torch.cat((pfs, x), dim=1)
+            y_trim = chunk_size * self._frame_size
             y = []
-            _x = x.clone()
             if debug:
                 print(chunk_size)
-            while _x.size(1) > self.pre_frames:
-                chunk = _x[:, :chunk_size+self.pre_frames, :]
+            while _x.size(1) > chunk_size:
+                chunk = _x[:, :chunk_size*2, :]
                 y.append(super().forward(chunk)[:, y_trim:])
                 _x = _x[:, chunk_size:, :]
             z.append(torch.cat(y, dim=1))
@@ -282,13 +279,16 @@ def train(rank, a, h):
 
             # L1 Mel-Spectrogram Loss
 
-            y_mel_a = y_mel[0].repeat(len(y_g_hat_mels), 1, 1)
+            y_mel_a = y_mel[0]
+            y_mel_a = y_mel_a.repeat(len(y_g_hat_mels), 1, 1)
             y_g_hat_mels_a = torch.cat([yghm[0] for yghm in y_g_hat_mels],
                                        dim=0)
             if debug_m:
                 print(y_mel_a.size(), y_g_hat_mels_a.size())
-            loss_mel = F.l1_loss(y_mel_a, y_g_hat_mels_a,
-                                 reduction='sum') / y_mel_a.numel()
+            loss_mel = torch.abs(y_mel_a - y_g_hat_mels_a)
+            loss_mel = loss_mel.sum(dim=1).mean()
+            #loss_mel = F.l1_loss(y_mel_a, y_g_hat_mels_a,
+            #                     reduction='sum') / y_mel_a.numel()
             if debug_m:
                 print(loss_mel)
 
@@ -425,11 +425,12 @@ def train(rank, a, h):
                                 for data in yghes])
                         for j, yghe in enumerate(yghes):
                             yghe_name, yghe_data = yghe
+                            yghe_norm_min = max(min_yghe_value, max_yghe_value / 100)
+                            yghe_norm = LogNorm(vmin=yghe_norm_min,
+                                    vmax=max_yghe_value)
                             yghe_spec = plot_spectrogram(yghe_data.cpu().numpy(),
-                                                         vmin=min_yghe_value,
-                                                         vmax=max_yghe_value,
                                                          cmap='plasma',
-                                                         norm=LogNorm())
+                                                         norm=yghe_norm)
                             sw.add_figure(yghe_name, yghe_spec, steps)
 
                         val_err = val_err_tot / (j+1)
