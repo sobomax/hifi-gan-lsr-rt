@@ -95,7 +95,8 @@ def mel_spectrogram(y, o: mel_spec_options):
 
     global mel_basis, hann_window
     if o.fmax not in mel_basis:
-        mel = librosa_mel_fn(o.sampling_rate, o.n_fft, o.num_mels, o.fmin, o.fmax)
+        mel = librosa_mel_fn(sr=o.sampling_rate, n_fft=o.n_fft,
+                n_mels=o.num_mels, fmin=o.fmin, fmax=o.fmax)
         mel_basis[str(o.fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
         hann_window[str(y.device)] = torch.hann_window(o.win_size).to(y.device)
 
