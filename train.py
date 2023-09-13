@@ -23,6 +23,7 @@ from meldataset import MelDataset, mel_spectrogram, mel_spec_options, \
 from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
     discriminator_loss
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
+from mel_loss import MelLossAP
 from matplotlib.colors import LogNorm
 
 import multiprocessing
@@ -33,35 +34,42 @@ debug_m = False
 
 class MySpeechT5HifiGan(SpeechT5HifiGan):
     _frame_size = 256 # Fixme
+    sampling_rate = None
+    pre_frames = 2
     def __init__(self, h=None):
-        st5conf = SpeechT5HifiGanConfig()
+        self.sampling_rate = h.sampling_rate
+        st5conf = SpeechT5HifiGanConfig(
+                #model_in_dim=81,
+                )
         return super().__init__(st5conf)
     #def __new__(cls, *args, **kwargs):
     #    instance = super().from_pretrained("microsoft/speecht5_hifigan")
     #    return instance
 
+
     def forward(self, x, debug=False, chunks=None):
-        #debug=True
         if debug:
             print(f'MySpeechT5HifiGan.forward(x.size = {x.size()})')
         x = x.permute(0, 2, 1)
+        pfs = torch.zeros(x.size(0), self.pre_frames, x.size(2),
+                          device=x.device)
+        x = torch.cat((pfs, x), dim=1)
+        y_trim = self.pre_frames * self._frame_size
         if not self.training and chunks is None:
-            return super().forward(x)
+            y = super().forward(x)
+            return y[:, y_trim:]
         if debug:
             print(f'x.size = {x.size()}')
         if chunks is None:
             chunks = (32, 2, 4, 8, 16)
         z = []
         for chunk_size in chunks:
-            pfs = torch.zeros(x.size(0), chunk_size, x.size(2),
-                    device=x.device)
-            _x = torch.cat((pfs, x), dim=1)
-            y_trim = chunk_size * self._frame_size
             y = []
+            _x = x.clone()
             if debug:
                 print(chunk_size)
-            while _x.size(1) > chunk_size:
-                chunk = _x[:, :chunk_size*2, :]
+            while _x.size(1) > self.pre_frames:
+                chunk = _x[:, :chunk_size+self.pre_frames, :]
                 y.append(super().forward(chunk)[:, y_trim:])
                 _x = _x[:, chunk_size:, :]
             z.append(torch.cat(y, dim=1))
@@ -86,371 +94,401 @@ class TrainingMSO(MyMSO):
         self.fmax = h.fmax_for_loss
         self.return_phase = True
 
+class MyTrainer():
+    def train(self, rank, a, h):
+        if h.num_gpus > 1:
+            init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
+                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=self.rank)
 
-def train(rank, a, h):
-    if h.num_gpus > 1:
-        init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
-                           world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
-
-    torch.manual_seed(h.seed)
-    if rank == 0 and a.device != 'cpu':
-        if not ':' in a.device:
-            devname = f'{a.device}:{rank}'
+        torch.manual_seed(h.seed)
+        self.h = h
+        self.a = a
+        self.rank = rank
+        if self.rank == 0 and a.device != 'cpu':
+            if not ':' in a.device:
+                devname = f'{a.device}:{self.rank}'
+            else:
+                devname = a.device
         else:
-            devname = a.device
-    else:
-        devname = 'cpu'
-    device = torch.device(devname)
+            devname = 'cpu'
+        self.device = device = torch.device(devname)
 
-    #generator = Generator(h).to(device)
-    #generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
-    generator = MySpeechT5HifiGan(h).to(device)
-    if not a.generator_only:
-        mpd = MultiPeriodDiscriminator().to(device)
-        msd = MultiScaleDiscriminator().to(device)
-    else:
-        mpd = None
-        msd = None
+        self.generator = MySpeechT5HifiGan(h).to(device)
+        if not a.generator_only:
+            self.mpd = MultiPeriodDiscriminator().to(device)
+            self.msd = MultiScaleDiscriminator().to(device)
+        else:
+            self.mpd = None
+            self.msd = None
 
-    if rank == 0:
-        print(generator)
-        os.makedirs(a.checkpoint_path, exist_ok=True)
-        print("checkpoints directory : ", a.checkpoint_path)
+        if self.rank == 0:
+            print(self.generator)
+            os.makedirs(a.checkpoint_path, exist_ok=True)
+            print("checkpoints directory : ", a.checkpoint_path)
 
-    if os.path.isdir(a.checkpoint_path):
-        cp_g = scan_checkpoint(a.checkpoint_path, 'g_')
-        cp_do = scan_checkpoint(a.checkpoint_path, 'do_')
+        if os.path.isdir(a.checkpoint_path):
+            cp_g = scan_checkpoint(a.checkpoint_path, 'g_')
+            cp_do = scan_checkpoint(a.checkpoint_path, 'do_')
 
-    steps = 0
-    last_epoch = -1
-    min_yghe_value = None
-    max_yghe_value = None
-    if cp_g is None:
-        state_dict_g = None
-        generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
-    else:
-        state_dict_g = load_checkpoint(cp_g, device)
-        generator.load_state_dict(state_dict_g['generator'])
-        del state_dict_g['generator']
-        steps = state_dict_g['steps'] + 1
-        last_epoch = state_dict_g['epoch']
-        min_yghe_value = state_dict_g['min_yghe_value']
-        max_yghe_value = state_dict_g['max_yghe_value']
-    if cp_do is None:
-        state_dict_do = None
-    else:
-        state_dict_do = load_checkpoint(cp_do, device)
-        #generator = torch.compile(generator
-        if mpd:
-            mpd.load_state_dict(state_dict_do['mpd'])
-        if msd:
-            msd.load_state_dict(state_dict_do['msd'])
-        steps = state_dict_do['steps'] + 1
-        last_epoch = state_dict_do['epoch']
-
-    if h.num_gpus > 1:
-        generator = DistributedDataParallel(generator, device_ids=[rank]).to(device)
-        if mpd:
-            mpd = DistributedDataParallel(mpd, device_ids=[rank]).to(device)
-        if msd:
-            msd = DistributedDataParallel(msd, device_ids=[rank]).to(device)
-
-    optim_g = torch.optim.AdamW(generator.parameters(), h.learning_rate, betas=[h.adam_b1, h.adam_b2])
-    if mpd:
-        assert msd is not None
-        optim_d = torch.optim.AdamW(itertools.chain(msd.parameters(), mpd.parameters()),
-                                h.learning_rate, betas=[h.adam_b1, h.adam_b2])
-
-    if state_dict_do is not None:
-        optim_d.load_state_dict(state_dict_do['optim_d'])
-        optim_g.load_state_dict(state_dict_do['optim_g'])
-    elif state_dict_g is not None:
-        optim_g.load_state_dict(state_dict_g['optim_g'])
-        del state_dict_g['optim_g']
-
-    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
-    if mpd:
-        scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=h.lr_decay, last_epoch=last_epoch)
-
-    training_filelist, validation_filelist = get_dataset_filelist(a)
-
-    mso_ref = MyMSO(h, a)
-    mso_loss = TrainingMSO(h, a)
-    trainset = MelDataset(training_filelist, h.segment_size, h.hop_size, h.sampling_rate,
-                          mso_ref, mso_loss, n_cache_reuse=1024,
-                          shuffle=False if h.num_gpus > 1 else True, device=device,
-                          fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
-
-    train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
-
-    train_loader = DataLoader(trainset, num_workers=h.num_workers,
-                              shuffle=a.shuffle_input,
-                              prefetch_factor=2,
-                              sampler=train_sampler,
-                              batch_size=h.batch_size,
-                              pin_memory=a.pin_memory,
-                              drop_last=True,
-                              persistent_workers=True if h.num_workers > 0 else False)
-
-    if a.precompute_mels:
-        for i, batch in enumerate(train_loader):
-            print(f'{i}: {len(batch) * len(batch[0])}')
-        exit(0)
-
-    if rank == 0:
-        validset = MelDataset(validation_filelist, h.segment_size, h.hop_size, h.sampling_rate,
-                                mso_ref, mso_loss, split=False, shuffle=False, n_cache_reuse=1024,
-                                device=device, fine_tuning=a.fine_tuning,
-                                base_mels_path=a.input_mels_dir)
-        nw = min(1, h.num_workers)
-        validation_loader = DataLoader(validset, num_workers=nw, shuffle=False,
-                                       prefetch_factor=2,
-                                       sampler=None,
-                                       batch_size=1,
-                                       pin_memory=a.pin_memory,
-                                       drop_last=True,
-                                       persistent_workers=True if nw > 0 else False)
-
-        sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
-
-    #torch.autograd.set_detect_anomaly(True)
-    torch.cuda.empty_cache()
-    generator.train()
-    if mpd:
-        mpd.train()
-    if msd:
-        msd.train()
-
-    if a.focus_mels:
-        mel_weight = torch.linspace(1.0, 0.01, h.num_mels*1)
-        mel_weight = mel_weight[None, :, None].to(device)
-
-    if ipex is not None:
-        generator, optim_g = ipex.optimize(model=generator, optimizer=optim_g)
-    for epoch in range(max(0, last_epoch), a.training_epochs):
-        if rank == 0:
-            start = time.time()
-            print("Epoch: {}".format(epoch+1))
+        self.steps = 0
+        last_epoch = -1
+        self.min_yghe_value = None
+        self.max_yghe_value = None
+        if cp_g is None:
+            state_dict_g = None
+            try:
+                self.generator = MySpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
+            except RuntimeError:
+                pass
+        else:
+            state_dict_g = load_checkpoint(cp_g, device)
+            self.generator.load_state_dict(state_dict_g['generator'])
+            del state_dict_g['generator']
+            self.steps = state_dict_g['steps'] + 1
+            last_epoch = state_dict_g['epoch']
+            self.min_yghe_value = state_dict_g['min_yghe_value']
+            self.max_yghe_value = state_dict_g['max_yghe_value']
+        if cp_do is None:
+            state_dict_do = None
+        else:
+            state_dict_do = load_checkpoint(cp_do, device)
+            if self.mpd:
+                self.mpd.load_state_dict(state_dict_do['mpd'])
+            if self.msd:
+                self.msd.load_state_dict(state_dict_do['msd'])
+            self.steps = state_dict_do['steps'] + 1
+            last_epoch = state_dict_do['epoch']
 
         if h.num_gpus > 1:
-            train_sampler.set_epoch(epoch)
+            self.generator = DistributedDataParallel(self.generator,
+                    device_ids=[self.rank]).to(device)
+            if self.mpd:
+                self.mpd = DistributedDataParallel(self.mpd, device_ids=[self.rank]).to(device)
+            if self.msd:
+                self.msd = DistributedDataParallel(self.msd, device_ids=[self.rank]).to(device)
 
-        for i, batch in enumerate(train_loader):
-            if rank == 0:
-                start_b = time.time()
-            x, y, fn, y_mel = batch
-            x = x.to(device)
-            y = y.to(device)
-            y_mel[0] = y_mel[0].to(device)
-            if a.focus_mels:
-                #print(y_mel[0].size(), y_mel[1].size(), mel_weight.size())
-                y_mel[0] *=  mel_weight
+        self.optim_g = torch.optim.AdamW(self.generator.parameters(), h.learning_rate,
+                betas=[h.adam_b1, h.adam_b2])
+        if self.mpd:
+            assert self.msd is not None
+            self.optim_d = torch.optim.AdamW(itertools.chain(self.msd.parameters(), self.mpd.parameters()),
+                                    h.learning_rate, betas=[h.adam_b1, h.adam_b2])
 
-            y = y.unsqueeze(1)
+        if state_dict_do is not None:
+            self.optim_d.load_state_dict(state_dict_do['optim_d'])
+            self.optim_g.load_state_dict(state_dict_do['optim_g'])
+        elif state_dict_g is not None:
+            self.optim_g.load_state_dict(state_dict_g['optim_g'])
+            del state_dict_g['optim_g']
 
-            y_g_hats = generator(x)
-            y_g_hat_mels = [mel_spectrogram(ygh.squeeze(1), mso_loss)
-                            for ygh in y_g_hats]
-            if a.focus_mels:
-                y_g_hat_mel[0] = y_g_hat_mel[0] * mel_weight
+        scheduler_g = torch.optim.lr_scheduler.ExponentialLR(self.optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
+        if self.mpd:
+            scheduler_d = torch.optim.lr_scheduler.ExponentialLR(self.optim_d, gamma=h.lr_decay, last_epoch=last_epoch)
 
-            # MPD
-            if mpd:
-                optim_d.zero_grad()
-                y_df_hat_r, y_df_hat_g, _, _ = mpd(y, y_g_hat.detach())
-                loss_disc_f, _, _ = discriminator_loss(y_df_hat_r, y_df_hat_g)
+        training_filelist, validation_filelist = get_dataset_filelist(a)
 
-            # MSD
-            if msd:
-                y_ds_hat_r, y_ds_hat_g, _, _ = msd(y, y_g_hat.detach())
-                loss_disc_s, _, _ = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
+        mso_ref = MyMSO(h, a)
+        self.mso_loss = TrainingMSO(h, a)
+        trainset = MelDataset(training_filelist, h.segment_size, h.hop_size, h.sampling_rate,
+                            mso_ref, self.mso_loss, n_cache_reuse=1024,
+                            shuffle=False if h.num_gpus > 1 else True, device=device,
+                            fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
 
-            if msd:
-                loss_disc_all = loss_disc_s
-            if mpd:
-                loss_disc_all += loss_disc_f
+        train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
 
-            if mpd:
-                loss_disc_all.backward()
-                optim_d.step()
+        self.train_loader = DataLoader(trainset, num_workers=h.num_workers,
+                                shuffle=a.shuffle_input,
+                                prefetch_factor=2,
+                                sampler=train_sampler,
+                                batch_size=h.batch_size,
+                                pin_memory=a.pin_memory,
+                                drop_last=True,
+                                persistent_workers=True if h.num_workers > 0 else False)
 
-            # Generator
-            optim_g.zero_grad()
+        if a.precompute_mels:
+            for i, batch in enumerate(self.train_loader):
+                print(f'{i}: {len(batch) * len(batch[0])}')
+            exit(0)
+        self.mel_loss_o = MelLossAP(device)
 
-            # L1 Mel-Spectrogram Loss
+        if self.rank == 0:
+            validset = MelDataset(validation_filelist, h.segment_size, h.hop_size, h.sampling_rate,
+                                    mso_ref, self.mso_loss, split=False, shuffle=False, n_cache_reuse=1024,
+                                    device=device, fine_tuning=a.fine_tuning,
+                                    base_mels_path=a.input_mels_dir)
+            nw = min(1, h.num_workers)
+            self.validation_loader = DataLoader(validset, num_workers=nw, shuffle=False,
+                                        prefetch_factor=2,
+                                        sampler=None,
+                                        batch_size=1,
+                                        pin_memory=a.pin_memory,
+                                        drop_last=True,
+                                        persistent_workers=True if nw > 0 else False)
 
-            y_mel_a = y_mel[0]
-            y_mel_a = y_mel_a.repeat(len(y_g_hat_mels), 1, 1)
-            y_g_hat_mels_a = torch.cat([yghm[0] for yghm in y_g_hat_mels],
-                                       dim=0)
-            if debug_m:
-                print(y_mel_a.size(), y_g_hat_mels_a.size())
-            loss_mel = torch.abs(y_mel_a - y_g_hat_mels_a)
-            loss_mel = loss_mel.sum(dim=1).mean()
-            #loss_mel = F.l1_loss(y_mel_a, y_g_hat_mels_a,
-            #                     reduction='sum') / y_mel_a.numel()
-            if debug_m:
-                print(loss_mel)
+            sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
 
-            assert not y_g_hat_mels[0][0].isnan().any() and not loss_mel.isnan().any()
-            #print(f'y_g_hat_mel[0].size() = {y_g_hat_mel[0].size()}')
-            #loss_mel += F.l1_loss(y_mel[1], y_g_hat_mel[1]) * 10
+        #torch.autograd.set_detect_anomaly(True)
+        torch.cuda.empty_cache()
+        self.generator.train()
+        if self.mpd:
+            self.mpd.train()
+        if self.msd:
+            self.msd.train()
 
-            if mpd:
-                y_df_hat_r, y_df_hat_g, fmap_f_r, fmap_f_g = mpd(y, y_g_hat)
-            if msd:
-                y_ds_hat_r, y_ds_hat_g, fmap_s_r, fmap_s_g = msd(y, y_g_hat)
-            if mpd:
-                loss_fm_f = feature_loss(fmap_f_r, fmap_f_g)
-            if msd:
-                loss_fm_s = feature_loss(fmap_s_r, fmap_s_g)
-            if mpd:
-                loss_gen_f, _ = generator_loss(y_df_hat_g)
-            if msd:
-                loss_gen_s, _ = generator_loss(y_ds_hat_g)
-            loss_gen_all = loss_mel
-            if mpd:
-                loss_gen_all += loss_fm_f + loss_gen_f
-            if msd:
-                loss_gen_all += loss_fm_s + loss_gen_s
+        if ipex is not None:
+            self.generator, self.optim_g = ipex.optimize(model=self.generator,
+                    optimizer=self.optim_g)
+        for epoch in range(max(0, last_epoch), a.training_epochs):
+            if self.rank == 0:
+                start = time.time()
+                print("Epoch: {}".format(epoch+1))
 
-            loss_gen_all.backward()
-            optim_g.step()
+            if self.steps == 0 and a.fine_tuning:
+                self.validate(sw)
 
-            if rank == 0:
-                # STDOUT logging
-                stdur = time.time() - start_b
-                if steps % a.stdout_interval == 0:
-                    with torch.no_grad():
-                        mel_error = loss_mel.item()
-                        #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
+            if h.num_gpus > 1:
+                train_sampler.set_epoch(epoch)
 
-                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, ' \
-                            'Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
-                          format(steps, loss_gen_all, mel_error, stdur))
+            for i, batch in enumerate(self.train_loader):
+                loss_gen_all, loss_mel, loss_freq, loss_time = \
+                  self.train_step(i, batch)
 
-                # checkpointing
-                if steps % a.checkpoint_interval == 0 and steps != 0:
-                    checkpoint_path = "{}/g_{:08d}".format(a.checkpoint_path, steps)
-                    cp_data = {'generator': (generator.module
-                                             if h.num_gpus > 1
-                                             else generator).state_dict(),
-                               'min_yghe_value': min_yghe_value,
-                               'max_yghe_value': max_yghe_value}
-                    if mpd is None:
-                        cp_data['optim_g'] = optim_g.state_dict()
-                        cp_data['steps'] = steps
-                        cp_data['epoch'] = epoch
-                    save_checkpoint(checkpoint_path, cp_data)
-                    if mpd is not None or msd is not None:
-                        checkpoint_path = "{}/do_{:08d}".format(a.checkpoint_path, steps)
-                        cp_data = {}
-                        if mpd:
-                            mpd_s = (mpd.module if h.num_gpus > 1
-                                     else mpd).state_dict()
-                            cp_data['mpd'] = mpd_s
-                            cp_data['optim_d'] = optim_d.state_dict()
-                        if msd:
-                            cp_data['msd'] = (msd.module if h.num_gpus > 1
-                                      else msd).state_dict()
-                        cp_data['optim_g'] = optim_g.state_dict()
-                        cp_data['steps'] = steps
-                        cp_data['epoch'] = epoch
+                if self.rank == 0:
+                    # STDOUT logging
+                    stdur = time.time() - self.start_b
+                    if self.steps % a.stdout_interval == 0:
+                        with torch.no_grad():
+                            mel_error = loss_mel.item()
+                            #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
+                        print('Steps : {:d}, Gen Loss Total : {:4.3f}, ' \
+                                'Mel-Spec. Error : {:4.3f} (fr:{:4.3f}+tm:{:4.3f}), ' \
+                                's/b : {:4.3f}'.
+                            format(self.steps, loss_gen_all, mel_error,
+                                loss_freq, loss_time, stdur))
+
+                    # checkpointing
+                    if self.steps % a.checkpoint_interval == 0 and self.steps != 0:
+                        checkpoint_path = "{}/g_{:08d}".format(a.checkpoint_path, self.steps)
+                        cp_data = {'generator': (self.generator.module
+                                                if h.num_gpus > 1
+                                                else self.generator).state_dict(),
+                                'min_yghe_value': self.min_yghe_value,
+                                'max_yghe_value': self.max_yghe_value}
+                        if self.mpd is None:
+                            cp_data['optim_g'] = self.optim_g.state_dict()
+                            cp_data['steps'] = self.steps
+                            cp_data['epoch'] = epoch
                         save_checkpoint(checkpoint_path, cp_data)
-                    del cp_data
+                        if self.mpd is not None or self.msd is not None:
+                            checkpoint_path = "{}/do_{:08d}".format(a.checkpoint_path, self.steps)
+                            cp_data = {}
+                            if self.mpd:
+                                mpd_s = (self.mpd.module if h.num_gpus > 1
+                                        else self.mpd).state_dict()
+                                cp_data['mpd'] = mpd_s
+                                cp_data['optim_d'] = self.optim_d.state_dict()
+                            if self.msd:
+                                cp_data['msd'] = (self.msd.module if h.num_gpus > 1
+                                        else self.msd).state_dict()
+                            cp_data['optim_g'] = self.optim_g.state_dict()
+                            cp_data['steps'] = self.steps
+                            cp_data['epoch'] = epoch
 
-                # Tensorboard summary logging
-                if steps % a.summary_interval == 0:
-                    sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
-                    sw.add_scalar("training/mel_spec_error", mel_error, steps)
-                    sw.add_scalar("performance/secs_per_batch", stdur, steps)
-                    for i, param_group in enumerate(optim_g.param_groups):
-                        sw.add_scalar(f"training/optim_g_lr_{i}",
-                                      param_group['lr'], steps)
-                    sw.flush()
+                            save_checkpoint(checkpoint_path, cp_data)
+                        del cp_data
 
-                # Validation
-                if steps % a.validation_interval == 0:  # and steps != 0:
-                    generator.eval()
-                    torch.cuda.empty_cache()
-                    val_err_tot = 0
-                    with torch.no_grad():
-                        yghes = []
-                        for j, batch in enumerate(validation_loader):
-                            x, y, fn, y_mel = batch
-                            fn = os.path.basename(fn[0])
-                            chunksz = min(2 ** j, 32)
-                            y_g_hat = generator(x.to(device), chunks=(chunksz,))[0]
-                            y_mel[0] = y_mel[0].to(device)
-                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), mso_loss)
-                            vet_inc = F.l1_loss(y_mel[0], y_g_hat_mel[0],
-                                                reduction='sum') / y_mel[0].numel()
-                            vet_inc = vet_inc.item()
-                            val_err_tot += vet_inc
+                    # Tensorboard summary logging
+                    if self.steps % a.summary_interval == 0:
+                        sw.add_scalar("training/gen_loss_total", loss_gen_all, self.steps)
+                        sw.add_scalar("training/mel_spec_error", mel_error, self.steps)
+                        sw.add_scalar("performance/secs_per_batch", stdur, self.steps)
+                        for i, param_group in enumerate(self.optim_g.param_groups):
+                            sw.add_scalar(f"training/optim_g_lr_{i}",
+                                        param_group['lr'], self.steps)
+                        sw.flush()
 
-                            #val_err_tot += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
+                    # Validation
+                    if self.steps % a.validation_interval == 0 and self.steps != 0:
+                        self.validate(sw)
 
-                            if j <= 4:
-                                yghe_name = f'generated/y_hat_err_{j}'
-                                yghe_data = (y_mel[0] - y_g_hat_mel[0]).abs()
-                                if debug_m:
-                                    print(yghe_data.size())
-                                yghe_data = yghe_data.squeeze(0)
-                                yghes.append((yghe_name, yghe_data))
+                self.steps += 1
 
-                                sw.add_text(f'input/filename_{j}', fn, steps)
-                                sw.add_audio(f'gt/y_{j}', y[0], steps, h.sampling_rate),
-                                sw.add_figure(f'gt/y_spec_{j}', plot_spectrogram(y_mel[0][0].cpu().numpy()),
-                                              steps)
+            scheduler_g.step()
+            if self.mpd:
+                scheduler_d.step()
 
-                                sw.add_audio(f'generated/y_hat_{j}', y_g_hat[0], steps,
-                                             h.sampling_rate)
-                                gx_name = f'input/generator_x_{j}'
-                                gx_data = x.squeeze(0).cpu().numpy()
-                                gx_spec = plot_spectrogram(gx_data)
-                                sw.add_figure(gx_name, gx_spec, steps)
-                                mso = MyMSO(h, a)
-                                mso.return_phase = False
-                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), mso)
-                                yhs_name = f'generated/y_hat_spec_{j}'
-                                yhs_data = y_hat_spec.squeeze(0).cpu().numpy()
-                                yhs_spec = plot_spectrogram(yhs_data)
-                                sw.add_figure(yhs_name, yhs_spec, steps)
-                        if min_yghe_value is None:
-                            min_yghe_value = min([data[1].min().cpu().numpy()
-                                for data in yghes])
-                        if max_yghe_value is None:
-                            max_yghe_value = max([data[1].max().cpu().numpy()
-                                for data in yghes])
-                        for j, yghe in enumerate(yghes):
-                            yghe_name, yghe_data = yghe
-                            yghe_norm_min = max(min_yghe_value, max_yghe_value / 100)
-                            yghe_norm = LogNorm(vmin=yghe_norm_min,
-                                    vmax=max_yghe_value)
-                            yghe_spec = plot_spectrogram(yghe_data.cpu().numpy(),
-                                                         cmap='plasma',
-                                                         norm=yghe_norm)
-                            sw.add_figure(yghe_name, yghe_spec, steps)
+            if self.rank == 0:
+                epdur = time.time() - start
+                sw.add_scalar("performance/secs_per_epoch", epdur, epoch)
+                print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(epdur)))
+                sw.flush()
 
-                        val_err = val_err_tot / (j+1)
-                        sw.add_scalar("validation/mel_spec_error", val_err, steps)
-                        print(f'Validation error: {val_err:4.3f}')
-                    sw.flush()
+    def train_step(self, i, batch):
+        if self.rank == 0:
+            self.start_b = time.time()
+        x, y, fn, y_mel = batch
+        x = x.to(self.device)
+        y = y.to(self.device)
+        y_mel = [ym.to(self.device) for ym in y_mel]
 
-                    generator.train()
+        y = y.unsqueeze(1)
 
-            steps += 1
+        y_g_hats = self.generator(x)
+        y_g_hat_mels = [mel_spectrogram(ygh.squeeze(1), self.mso_loss)
+                        for ygh in y_g_hats]
 
-        scheduler_g.step()
-        if mpd:
-            scheduler_d.step()
-        
-        if rank == 0:
-            epdur = time.time() - start
-            sw.add_scalar("performance/secs_per_epoch", epdur, epoch)
-            print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(epdur)))
-            sw.flush()
+        # MPD
+        if self.mpd:
+            self.optim_d.zero_grad()
+            y_df_hat_r, y_df_hat_g, _, _ = self.mpd(y, y_g_hat.detach())
+            loss_disc_f, _, _ = discriminator_loss(y_df_hat_r, y_df_hat_g)
+
+        # MSD
+        if self.msd:
+            y_ds_hat_r, y_ds_hat_g, _, _ = self.msd(y, y_g_hat.detach())
+            loss_disc_s, _, _ = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
+
+        if self.msd:
+            loss_disc_all = loss_disc_s
+        if self.mpd:
+            loss_disc_all += loss_disc_f
+
+        if self.mpd:
+            loss_disc_all.backward()
+            self.optim_d.step()
+
+        # Generator
+        self.optim_g.zero_grad()
+
+        # Compute Mel-Spectrogram Loss
+        y_mel_a = y_mel[0]
+        y_mel_a = y_mel_a.repeat(len(y_g_hat_mels), 1, 1)
+        y_g_hat_mel_a = torch.cat([yghm.mel_a for yghm in y_g_hat_mels],
+                dim=0)
+        y_mel_p = y_mel[1]
+        y_mel_p = y_mel_p.repeat(len(y_g_hat_mels), 1, 1)
+        y_g_hat_mel_p = torch.cat([yghm.mel_p for yghm in y_g_hat_mels],
+                dim=0)
+        loss_mel = self.mel_loss_o.get_loss(y_mel_a, y_g_hat_mel_a,
+                y_mel_p, y_g_hat_mel_p)
+        loss_mel, loss_freq, loss_time = loss_mel
+
+        if debug_m:
+            print(loss_mel)
+
+        assert not y_g_hat_mels[0].mel_a.isnan().any() and not loss_mel.isnan().any()
+        #print(f'y_g_hat_mel[0].size() = {y_g_hat_mel[0].size()}')
+
+        if self.mpd:
+            y_df_hat_r, y_df_hat_g, fmap_f_r, fmap_f_g = self.mpd(y, y_g_hat)
+        if self.msd:
+            y_ds_hat_r, y_ds_hat_g, fmap_s_r, fmap_s_g = self.msd(y, y_g_hat)
+        if self.mpd:
+            loss_fm_f = feature_loss(fmap_f_r, fmap_f_g)
+        if self.msd:
+            loss_fm_s = feature_loss(fmap_s_r, fmap_s_g)
+        if self.mpd:
+            loss_gen_f, _ = generator_loss(y_df_hat_g)
+        if self.msd:
+            loss_gen_s, _ = generator_loss(y_ds_hat_g)
+        loss_gen_all = loss_mel
+        if self.mpd:
+            loss_gen_all += loss_fm_f + loss_gen_f
+        if self.msd:
+            loss_gen_all += loss_fm_s + loss_gen_s
+
+        loss_gen_all.backward()
+        self.optim_g.step()
+        return loss_gen_all, loss_mel, loss_freq, loss_time
+
+
+    def validate(self, sw):
+        self.generator.eval()
+        torch.cuda.empty_cache()
+        val_err_tot = 0
+        with torch.no_grad():
+            yghes = []
+            for j, batch in enumerate(self.validation_loader):
+                x, y, fn, y_mel = batch
+                fn = os.path.basename(fn[0])
+                chunksz = min(2 ** j, 32)
+                y_g_hat = self.generator(x.to(self.device), chunks=(chunksz,))[0]
+                y_mel = [ym.to(self.device) for ym in y_mel]
+                y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), self.mso_loss)
+                vet_inc = F.l1_loss(y_mel[0], y_g_hat_mel.mel_a,
+                                    reduction='sum') / y_mel[0].numel()
+                vet_inc = vet_inc.item()
+                val_err_tot += vet_inc
+
+                if j <= 4:
+                    yghe_name = f'generated/y_hat_err_{j}'
+                    yghe_data = (y_mel[0] - y_g_hat_mel.mel_a).abs()
+                    if debug_m:
+                        for k, z in enumerate((y_mel[1], y_g_hat_mel.mel_p)):
+                            print(f'k:', z.min(), z.max(), z.mean())
+                    yghe_data_ph = y_mel[1] - y_g_hat_mel.mel_p
+                    #print(yghe_data_ph.min(), yghe_data_ph.max(), yghe_data_ph.mean())
+                    # yghe_data_ph / 2 here is so pi difference prodice max
+                    # loss, which sin has at pi/2
+                    yghe_data_ph = torch.sin(yghe_data_ph / 2)
+                    yghe_data_ph = yghe_data_ph.unsqueeze(0)
+                    yghe_data_ph = self.mel_loss_o.phase_filter(yghe_data_ph).squeeze().abs()
+                    #print(y_mel[0].size(), y_g_hat_mel.mel_a.size())
+                    y_mel_an, y_g_hat_mel_an = self.mel_loss_o.norm_mels(
+                            y_mel[0], y_g_hat_mel.mel_a)
+                    max_ampl = torch.max(y_mel_an, y_mel_an).squeeze()
+                    yghe_data_ph *= max_ampl
+                    #print(yghe_data_ph.size())
+                    #print(yghe_data_ph.min(), yghe_data_ph.max(), yghe_data_ph.mean())
+                    if debug_m:
+                        print(yghe_data_ph.size())
+                    yghe_data = yghe_data.squeeze(0)
+                    yghes.append((yghe_name, yghe_data, yghe_data_ph))
+
+                    sw.add_text(f'input/filename_{j}', fn, self.steps)
+                    sw.add_audio(f'gt/y_{j}', y[0], self.steps, self.h.sampling_rate),
+                    sw.add_figure(f'gt/y_spec_{j}', plot_spectrogram(y_mel[0][0].cpu().numpy()),
+                                  self.steps)
+
+                    sw.add_audio(f'generated/y_hat_{j}', y_g_hat[0], self.steps,
+                                 self.h.sampling_rate)
+                    gx_name = f'input/generator_x_{j}'
+                    gx_data = x.squeeze(0).cpu().numpy()
+                    gx_spec = plot_spectrogram(gx_data)
+                    sw.add_figure(gx_name, gx_spec, self.steps)
+                    mso = MyMSO(self.h, self.a)
+                    mso.return_phase = False
+                    y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), mso).mel_a
+                    yhs_name = f'generated/y_hat_spec_{j}'
+                    yhs_data = y_hat_spec.squeeze(0).cpu().numpy()
+                    yhs_spec = plot_spectrogram(yhs_data)
+                    sw.add_figure(yhs_name, yhs_spec, self.steps)
+            if self.min_yghe_value is None:
+                self.min_yghe_value = min([data[1].min().cpu().numpy()
+                                     for data in yghes])
+            if self.max_yghe_value is None:
+                self.max_yghe_value = max([data[1].max().cpu().numpy()
+                                     for data in yghes])
+            for j, yghe in enumerate(yghes):
+                yghe_name, yghe_data, yghe_data_ph = yghe
+                yghe_norm_min = max(self.min_yghe_value, self.max_yghe_value / 100)
+                yghe_norm = LogNorm(vmin=yghe_norm_min,
+                                    vmax=self.max_yghe_value)
+                yghe_spec = plot_spectrogram(yghe_data.cpu().numpy(),
+                                             cmap='plasma',
+                                             norm=yghe_norm)
+                sw.add_figure(yghe_name, yghe_spec, self.steps)
+                yghe_spec_ph = plot_spectrogram(yghe_data_ph.cpu().numpy(),
+                                    cmap='inferno')
+                sw.add_figure(f'generated/y_hat_err_ph_{j}',
+                              yghe_spec_ph, self.steps)
+
+            val_err = val_err_tot / (j+1)
+            sw.add_scalar("validation/mel_spec_error", val_err, self.steps)
+            print(f'Validation error: {val_err:4.3f}')
+        sw.flush()
+        self.generator.train()
 
 
 def main():
@@ -473,7 +511,6 @@ def main():
     parser.add_argument('--fine_tuning', default=False, type=bool)
     parser.add_argument('--generator_only', default=False, type=bool)
     parser.add_argument('--precompute_mels', default=False, type=bool)
-    parser.add_argument('--focus_mels', default=False, type=bool)
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--pin_memory', default=True, type=bool)
     parser.add_argument('--mel_oversample', default=1, type=int)
@@ -498,11 +535,12 @@ def main():
     else:
         pass
 
+    trainer = MyTrainer()
     if h.num_gpus > 1:
-        mp.spawn(train, nprocs=h.num_gpus, args=(a, h,))
+        mp.spawn(trainer.train, nprocs=h.num_gpus, args=(a, h,))
     else:
         #multiprocessing.set_start_method('spawn', force=True)
-        train(0, a, h)
+        trainer.train(0, a, h)
 
 
 if __name__ == '__main__':
