@@ -114,7 +114,7 @@ def mel_spectrogram(y, o: mel_spec_options):
     mss = mel_spec()
     mss.fft = torch.stft(y, o.n_fft, hop_length=o.hop_size, win_length=o.win_size, window=hann_window[str(y.device)],
                       center=o.center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
-    ampl = mss.fft.abs()
+    ampl = torch.sqrt(mss.fft.real ** 2 + mss.fft.imag ** 2 + (1e-9))
     if o.return_phase:
         phase = mss.fft.angle()
         # Normalize
