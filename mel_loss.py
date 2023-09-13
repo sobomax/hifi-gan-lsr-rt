@@ -24,6 +24,14 @@ class MelLossAP():
     def __init__(self, device):
         self.phase_filter = MeanFilter(device, kernel_size=5)
 
+    def norm_mels(self, y_mel_a, y_g_hat_mel_a):
+        max_ampl_val = torch.max(y_mel_a, y_g_hat_mel_a).max()
+        min_ampl_val = torch.min(y_mel_a, y_g_hat_mel_a).min()
+        adiff = max_ampl_val - min_ampl_val
+        y_mel_a = (y_mel_a - min_ampl_val) / adiff
+        y_g_hat_mel_a = (y_g_hat_mel_a - min_ampl_val) / adiff
+        return (y_mel_a, y_g_hat_mel_a)
+
     def get_loss(self, *args):
         for arg in args:
             assert self.phase_filter.conv.weight.data.device == arg.device
@@ -35,9 +43,11 @@ class MelLossAP():
         loss_phase = self.phase_filter(loss_phase.unsqueeze(1)).squeeze(1)
         #print(3, loss_phase.size())
         loss_phase = loss_phase.abs()
-        max_ampl = torch.max(y_mel_a, y_g_hat_mel_a).abs()
-        max_ampl = max_ampl / max_ampl.max()
+        y_mel_a, y_g_hat_mel_a = self.norm_mels(y_mel_a,
+            y_g_hat_mel_a)
+        max_ampl = torch.max(y_mel_a, y_g_hat_mel_a)
         loss_phase = loss_phase * max_ampl
+        assert loss_phase.min() >= 0.0 and loss_phase.max() <= 1.0
         loss_mel = torch.abs(y_mel_a - y_g_hat_mel_a) + loss_phase
         loss_freq = loss_mel.sum(dim=1).mean()
         loss_time = loss_mel.sum(dim=2).mean()
