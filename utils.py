@@ -12,7 +12,18 @@ def plot_spectrogram(spectrogram, *im_a, **im_kw):
     im = ax.imshow(spectrogram, aspect="auto", origin="lower",
                    interpolation='none',
                    *im_a, **im_kw)
-    plt.colorbar(im, ax=ax)
+    cbar = plt.colorbar(im, ax=ax)
+    cbar_min = spectrogram.min()
+    cbar_max = spectrogram.max()
+    cbar_mean = spectrogram.mean()
+    format_spec = ".2f" if cbar_max > 0.1 else ".2e"
+    lb = f"min: {cbar_min:{format_spec}}\n" \
+            f"max: {cbar_max:{format_spec}}\n" \
+            f"mean: {cbar_mean:{format_spec}}"
+    cbar.set_label(lb)
+    cbar.ax.yaxis.label.set_rotation(0)
+    cbar.ax.yaxis.label.set_position((40, 1))
+    cbar.ax.yaxis.label.set_horizontalalignment('left')
 
     fig.canvas.draw()
     plt.close()
