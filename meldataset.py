@@ -81,7 +81,12 @@ class mel_spec_options:
     fmax = None
     center = False
     return_phase = False
+    norm_phase = False
 
+class mel_spec:
+    fft = None
+    mel_a = None
+    mel_p = None
 
 def mel_spectrogram(y, o: mel_spec_options):
     if torch.min(y) < -1.0001:
@@ -94,36 +99,38 @@ def mel_spectrogram(y, o: mel_spec_options):
         y = y.clamp(max=1.)
 
     global mel_basis, hann_window
-    if o.fmax not in mel_basis:
+    mb_name = str(o.fmax)+'_'+str(y.device)
+    if mb_name not in mel_basis:
         mel = librosa_mel_fn(sr=o.sampling_rate, n_fft=o.n_fft,
                 n_mels=o.num_mels, fmin=o.fmin, fmax=o.fmax)
-        mel_basis[str(o.fmax)+'_'+str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+        mel_b = torch.from_numpy(mel).float().to(y.device)
+        mel_basis[mb_name] = mel_b
         hann_window[str(y.device)] = torch.hann_window(o.win_size).to(y.device)
+    else:
+        mel_b = mel_basis[mb_name]
 
     y = F.pad(y.unsqueeze(1), (int((o.n_fft-o.hop_size)/2), int((o.n_fft-o.hop_size)/2)), mode='reflect')
     y = y.squeeze(1)
-    spec = torch.stft(y, o.n_fft, hop_length=o.hop_size, win_length=o.win_size, window=hann_window[str(y.device)],
+    mss = mel_spec()
+    mss.fft = torch.stft(y, o.n_fft, hop_length=o.hop_size, win_length=o.win_size, window=hann_window[str(y.device)],
                       center=o.center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
-    spec = torch.view_as_real(spec)
-    if not o.return_phase:
-        specs = [torch.sqrt(spec.pow(2).sum(-1)+(1e-9)),]
-    else:
-        amplitude = torch.sqrt(spec[..., 0]**2 + spec[..., 1]**2 + (1e-9))
-        phase = torch.atan2(spec[..., 1], spec[..., 0])
+    ampl = mss.fft.abs()
+    if o.return_phase:
+        phase = mss.fft.angle()
         # Normalize
-        phase = (phase + torch.tensor(math.pi)) / (2 * torch.tensor(math.pi))
-        specs = [amplitude, phase]
-        #assert amplitude.size() == phase.size()
-        #print(f'amplitude.size() = {amplitude.size()}')
-        #print(f'phase.size() = {phase.size()}')
+        phase = torch.exp(1j * phase)
+        mel_b_c = torch.complex(mel_b, torch.zeros_like(mel_b))
+        phase = torch.matmul(mel_b_c, phase).angle()
+        if o.norm_phase:
+            phase = (phase + torch.tensor(math.pi)) / (2 * torch.tensor(math.pi))
+        mss.mel_p = phase
 
-    specs[0] = torch.matmul(mel_basis[str(o.fmax)+'_'+str(y.device)], specs[0])
-    specs[0] = spectral_normalize_torch(specs[0])
+    ampl = torch.matmul(mel_b, ampl)
+    ampl = spectral_normalize_torch(ampl)
 
-    if not o.return_phase:
-        specs = specs[0]
+    mss.mel_a = ampl
 
-    return specs
+    return mss
 
 
 def get_dataset_filelist(a):
@@ -271,7 +278,7 @@ class MelDataset(torch.utils.data.Dataset):
                     audio = F.pad(audio, pad_size, 'constant')
                     #audio_flt = F.pad(audio_flt, pad_size, 'constant')
 
-            mel = mel_spectrogram(audio, self.mso_ref)
+            mel = mel_spectrogram(audio, self.mso_ref).mel_a
         else:
             #mel = np.load(
             #    os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + '.npy'))
@@ -296,10 +303,10 @@ class MelDataset(torch.utils.data.Dataset):
                 #audio = audio.to(self.device)
 
         mel_loss = mel_spectrogram(audio, self.mso_loss)
+        mel_loss = (mel_loss.mel_a.squeeze(), mel_loss.mel_p.squeeze())
         #print(mel.size())#, mel.device, mel_loss.size(), mel_loss.device)
         #raise Exception("BP")
-        return (mel.squeeze(), audio.squeeze(0), filename,
-                (mel_loss[0].squeeze(), mel_loss[1].squeeze()))
+        return (mel.squeeze(), audio.squeeze(0), filename, mel_loss)
 
 
     def __len__(self):
