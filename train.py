@@ -418,7 +418,7 @@ class MyTrainer():
             for j, batch in enumerate(self.validation_loader):
                 x, y, fn, y_mel = batch
                 fn = os.path.basename(fn[0])
-                chunksz = min(2 ** j, 32)
+                chunksz = min(2 ** (j + 1), 32)
                 y_g_hat = self.generator(x.to(self.device), chunks=(chunksz,))[0]
                 y_mel = [ym.to(self.device) for ym in y_mel]
                 y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), self.mso_loss)
