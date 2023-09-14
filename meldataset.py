@@ -13,6 +13,7 @@ from librosa.filters import mel as librosa_mel_fn
 from transformers import SpeechT5Processor as ST5P, \
         SpeechT5ForSpeechToSpeech as ST5FSTS, \
         SpeechT5HifiGan as ST5HG
+from datasets import load_dataset
 
 MAX_WAV_VALUE = 32768.0
 
@@ -141,7 +142,7 @@ def get_dataset_filelist(a):
     with open(a.input_validation_file, 'r', encoding='utf-8') as fi:
         validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
                             for x in fi.read().split('\n') if len(x) > 0]
-    return training_files[:1000], validation_files[:64]
+    return training_files[:1500], validation_files[:64]
 
 
 def hash_filename(filename):
@@ -216,11 +217,17 @@ class MelDataset(torch.utils.data.Dataset):
             self.model = model.to(self.device)
             vocoder = ST5HG.from_pretrained("microsoft/speecht5_hifigan")
             vocoder.eval()
+            embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
+            self.speaker_embeddings = [torch.tensor(ed["xvector"]).unsqueeze(0)
+                                       for ed in embeddings_dataset]
+
             self.vocoder = vocoder.to(self.device)
             if not os.path.exists(self.cache_dir):
                 os.makedirs(self.cache_dir)
 
-        speaker_embeddings = torch.randn(1, 512, device = self.model.device)
+        index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+        speaker_embeddings = self.speaker_embeddings[index].to(self.model.device)
+
         try:
             inputs = self.processor(audio=audio_in.squeeze(0), sampling_rate=self.sampling_rate,
                                     return_tensors="pt")
