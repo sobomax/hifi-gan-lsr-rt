@@ -36,6 +36,7 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
     _frame_size = 256 # Fixme
     sampling_rate = None
     pre_frames = 2
+    post_frames = 2
     def __init__(self, h=None):
         self.sampling_rate = h.sampling_rate
         st5conf = SpeechT5HifiGanConfig(
@@ -51,26 +52,31 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
         if debug:
             print(f'MySpeechT5HifiGan.forward(x.size = {x.size()})')
         x = x.permute(0, 2, 1)
-        pfs = torch.zeros(x.size(0), self.pre_frames, x.size(2),
-                          device=x.device)
-        x = torch.cat((pfs, x), dim=1)
-        y_trim = self.pre_frames * self._frame_size
+        prfs = torch.zeros(x.size(0), self.pre_frames, x.size(2),
+                           device=x.device)
+        pofs = torch.zeros(x.size(0), self.post_frames, x.size(2),
+                           device=x.device)
+        x = torch.cat((prfs, x, pofs), dim=1)
+        y_trim_pr = self.pre_frames * self._frame_size
+        y_trim_po = self.post_frames * self._frame_size
         if not self.training and chunks is None:
             y = super().forward(x)
-            return y[:, y_trim:]
+            return y[:, y_trim_pr:-y_trim_po]
         if debug:
             print(f'x.size = {x.size()}')
         if chunks is None:
-            chunks = (32, 2, 4, 8, 16)
+            chunks = (32, 4, 8, 16)
         z = []
         for chunk_size in chunks:
             y = []
             _x = x.clone()
             if debug:
                 print(chunk_size)
-            while _x.size(1) > self.pre_frames:
-                chunk = _x[:, :chunk_size+self.pre_frames, :]
-                y.append(super().forward(chunk)[:, y_trim:])
+            eframes = self.pre_frames + self.post_frames
+            while _x.size(1) > eframes:
+                chunk = _x[:, :chunk_size+eframes, :]
+                _y = super().forward(chunk)
+                y.append(_y[:, y_trim_pr:-y_trim_po])
                 _x = _x[:, chunk_size:, :]
             z.append(torch.cat(y, dim=1))
         return z
