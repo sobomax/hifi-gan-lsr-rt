@@ -14,7 +14,7 @@
     "resblock_kernel_sizes": [3,5,7],
     "resblock_dilation_sizes": [[1,2], [2,6], [3,12]],
 
-    "segment_size": 8192,
+    "segment_size": 16384,
     "num_mels": 80,
     "num_freq": 1025,
     "n_fft": 1024,
