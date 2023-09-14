@@ -37,8 +37,9 @@ class MelLossAP():
         for arg in args:
             assert self.phase_filter.conv.weight.data.device == arg.device
         y_mel_a, y_g_hat_mel_a, y_mel_p, y_g_hat_mel_p = args
-        y_mel_a, y_g_hat_mel_a = self.norm_mels(y_mel_a,
-                y_g_hat_mel_a)
+        if self.include_phase:
+            y_mel_a, y_g_hat_mel_a = self.norm_mels(y_mel_a,
+                                                    y_g_hat_mel_a)
         loss_mel = torch.abs(y_mel_a - y_g_hat_mel_a)
         if self.include_phase:
             loss_phase = y_mel_p - y_g_hat_mel_p
