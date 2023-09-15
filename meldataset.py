@@ -118,7 +118,7 @@ def mel_spectrogram(y, o: mel_spec_options):
                       center=o.center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
     ampl = torch.sqrt(mss.fft.real ** 2 + mss.fft.imag ** 2 + (1e-9))
     if o.return_phase:
-        phase = mss.fft.angle()
+        phase = torch.atan2(mss.fft.imag, mss.fft.real)
         # Normalize
         phase = torch.exp(1j * phase)
         mel_b_c = torch.complex(mel_b, torch.zeros_like(mel_b))
