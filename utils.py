@@ -68,3 +68,8 @@ def scan_checkpoint(cp_dir, prefix):
         return None
     return sorted(cp_list)[-1]
 
+def anomaly_check(x, name):
+    if x.isnan().any():
+        raise Exception(f"{name} anomaly: NaN: {x}")
+    if x.isinf().any():
+        raise Exception(f"{name} anomaly: Infinity detected: {x}")
