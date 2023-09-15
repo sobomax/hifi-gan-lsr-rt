@@ -255,7 +255,7 @@ class MyTrainer():
         if ipex is not None:
             self.generator, self.optim_g = ipex.optimize(model=self.generator,
                     optimizer=self.optim_g)
-        for epoch in range(max(0, last_epoch), a.training_epochs):
+        for self.epoch in range(max(0, last_epoch), a.training_epochs):
             if self.rank == 0:
                 start = time.time()
                 print("epoch: {}".format(self.epoch+1))
