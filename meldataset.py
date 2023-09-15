@@ -12,7 +12,8 @@ from scipy.signal import firwin
 from librosa.filters import mel as librosa_mel_fn
 from transformers import SpeechT5Processor as ST5P, \
         SpeechT5ForSpeechToSpeech as ST5FSTS, \
-        SpeechT5HifiGan as ST5HG
+        SpeechT5HifiGan as ST5HG, \
+        SpeechT5Config as ST5C
 from datasets import load_dataset
 
 MAX_WAV_VALUE = 32768.0
@@ -142,7 +143,7 @@ def get_dataset_filelist(a):
     with open(a.input_validation_file, 'r', encoding='utf-8') as fi:
         validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
                             for x in fi.read().split('\n') if len(x) > 0]
-    return training_files[:1500], validation_files[:64]
+    return training_files[:3000], validation_files[:64]
 
 
 def hash_filename(filename):
@@ -186,25 +187,26 @@ class MelDataset(torch.utils.data.Dataset):
 
 
     def getMelRef(self, audio_in, filename, cachetag):
-        fn_hash = hash_filename(f'v3-{filename}-{cachetag}')
-        o_fn_hash = hash_filename(f'v2-{filename}')
-        for i, _fn_hash in enumerate((fn_hash, o_fn_hash)):
+        fn_hash = hash_filename(f'v4-{filename}-{cachetag}')
+        o_fn_hash = [hash_filename(fn) for fn in (f'v2-{filename}', f'v3-{filename}-{cachetag}')]
+        for i, _fn_hash in enumerate([fn_hash,] + o_fn_hash):
             #if 'LJ050-02' in filename:
             #    break
             mels_cp = os.path.join(self.cache_dir, f"{_fn_hash}.mel.pt")
             audios_cp = os.path.join(self.cache_dir, f"{_fn_hash}.audio.pt")
             if os.path.exists(mels_cp) and os.path.exists(audios_cp):
-                if i == 1 and np.random.rand() < 1.05:
+                if i == 1 and np.random.rand() < 0.05:
                     continue
                 mels = torch.load(mels_cp, map_location = 'cpu')
                 audios = torch.load(audios_cp, map_location = 'cpu')
                 if i == 0:
                     for xx in ("mel", "audio"):
-                        ofn = os.path.join(self.cache_dir, f"{o_fn_hash}.{xx}.pt")
-                        try:
-                            os.unlink(ofn)
-                        except FileNotFoundError:
-                            pass
+                        for ofh in o_fn_hash:
+                            ofn = os.path.join(self.cache_dir, f"{ofh}.{xx}.pt")
+                            try:
+                                os.unlink(ofn)
+                            except FileNotFoundError:
+                                pass
                 return (audios, mels)
         mels_cp = os.path.join(self.cache_dir, f"{fn_hash}.mel.pt")
         audios_cp = os.path.join(self.cache_dir, f"{fn_hash}.audio.pt")
@@ -212,7 +214,8 @@ class MelDataset(torch.utils.data.Dataset):
 
         if self.processor is None:
             self.processor = ST5P.from_pretrained("microsoft/speecht5_vc")
-            model = ST5FSTS.from_pretrained("microsoft/speecht5_vc")
+            mc = ST5C(max_speech_positions=10000)
+            model = ST5FSTS.from_pretrained("microsoft/speecht5_vc", config=mc)
             model.eval()
             self.model = model.to(self.device)
             vocoder = ST5HG.from_pretrained("microsoft/speecht5_hifigan")
@@ -225,18 +228,12 @@ class MelDataset(torch.utils.data.Dataset):
             if not os.path.exists(self.cache_dir):
                 os.makedirs(self.cache_dir)
 
+        inputs = self.processor(audio=audio_in.squeeze(0), sampling_rate=self.sampling_rate,
+                                return_tensors="pt")
+        inputs = inputs["input_values"].to(self.model.device)
         index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
         speaker_embeddings = self.speaker_embeddings[index].to(self.model.device)
-
-        try:
-            inputs = self.processor(audio=audio_in.squeeze(0), sampling_rate=self.sampling_rate,
-                                    return_tensors="pt")
-            inputs = inputs["input_values"].to(self.model.device)
-            print(f'inputs.size() = {inputs.size()}')
-            mel = self.model.generate_speech(inputs, speaker_embeddings)
-        except RuntimeError:
-            print(f'getMelRef({audio_in.size()}')
-            raise
+        mel = self.model.generate_speech(inputs, speaker_embeddings)
         audio = self.vocoder(mel).unsqueeze(0).cpu()
         mel = mel.t().unsqueeze(0).cpu()
         torch.save(audio, audios_cp)
