@@ -43,9 +43,6 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
                 #model_in_dim=81,
                 )
         return super().__init__(st5conf)
-    #def __new__(cls, *args, **kwargs):
-    #    instance = super().from_pretrained("microsoft/speecht5_hifigan")
-    #    return instance
 
 
     def forward(self, x, debug=False, chunks=None):
@@ -73,13 +70,26 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
             if debug:
                 print(chunk_size)
             eframes = self.pre_frames + self.post_frames
+            assert _x.size(1) > eframes
+            extra_pad = (_x.size(1) - eframes) % chunk_size
+            assert extra_pad < chunk_size
+            if extra_pad > 0:
+                _pofs = torch.zeros(x.size(0), extra_pad,
+                                    x.size(2), device=x.device)
+                _x = torch.cat((_x, _pofs), dim=1)
+            assert ((_x.size(1) - eframes) % chunk_size) == 0
             while _x.size(1) > eframes:
                 chunk = _x[:, :chunk_size+eframes, :]
                 assert chunk.size(1) == chunk_size+eframes
                 _y = super().forward(chunk)
                 y.append(_y[:, y_trim_pr:-y_trim_po])
                 _x = _x[:, chunk_size:, :]
+            if extra_pad > 0:
+                ep_trim = extra_pad * self._frame_size
+                assert y[-1].size(1) > ep_trim
+                y[-1] = y[-1][:, :-ep_trim]
             z.append(torch.cat(y, dim=1))
+
         return z
 
 
@@ -209,7 +219,7 @@ class MyTrainer():
                                 sampler=train_sampler,
                                 batch_size=h.batch_size,
                                 pin_memory=a.pin_memory,
-                                drop_last=True,
+                                drop_last=True if not a.precompute_mels else False,
                                 persistent_workers=True if h.num_workers > 0 else False)
 
         if a.precompute_mels:
@@ -248,74 +258,47 @@ class MyTrainer():
         for epoch in range(max(0, last_epoch), a.training_epochs):
             if self.rank == 0:
                 start = time.time()
-                print("Epoch: {}".format(epoch+1))
+                print("epoch: {}".format(self.epoch+1))
 
             if self.steps == 0 and a.fine_tuning:
                 self.validate(sw)
 
             if h.num_gpus > 1:
-                train_sampler.set_epoch(epoch)
+                train_sampler.set_epoch(self.epoch)
 
             for i, batch in enumerate(self.train_loader):
-                loss_gen_all, loss_mel = self.train_step(i, batch)
+                loss_gen_all, loss_mel, loss_mel_a, loss_mel_p = self.train_step(i, batch, sw)
 
-                if self.rank == 0:
-                    # STDOUT logging
-                    stdur = time.time() - self.start_b
-                    if self.steps % a.stdout_interval == 0:
-                        with torch.no_grad():
-                            mel_error = loss_mel.item()
-                            #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
+                if self.rank != 0:
+                    self.steps += 1
+                    continue
 
-                        print('Steps : {:d}, Gen Loss Total : {:4.3f}, ' \
-                                'Mel-Spec. Error : {:4.3f}, ' \
-                                's/b : {:4.3f}'.
-                            format(self.steps, loss_gen_all, mel_error, stdur))
+                # STDOUT logging
+                stdur = time.time() - self.start_b
+                with torch.no_grad():
+                    mel_error = loss_mel.item()
+                if self.steps % a.stdout_interval == 0:
+                    #with torch.no_grad():
+                    #    mel_error = loss_mel.item()
+                    #    #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
-                    # checkpointing
-                    if self.steps % a.checkpoint_interval == 0 and self.steps != 0:
-                        checkpoint_path = "{}/g_{:08d}".format(a.checkpoint_path, self.steps)
-                        cp_data = {'generator': (self.generator.module
-                                                if h.num_gpus > 1
-                                                else self.generator).state_dict(),
-                                'min_yghe_value': self.min_yghe_value,
-                                'max_yghe_value': self.max_yghe_value}
-                        if self.mpd is None:
-                            cp_data['optim_g'] = self.optim_g.state_dict()
-                            cp_data['steps'] = self.steps
-                            cp_data['epoch'] = epoch
-                        save_checkpoint(checkpoint_path, cp_data)
-                        if self.mpd is not None or self.msd is not None:
-                            checkpoint_path = "{}/do_{:08d}".format(a.checkpoint_path, self.steps)
-                            cp_data = {}
-                            if self.mpd:
-                                mpd_s = (self.mpd.module if h.num_gpus > 1
-                                        else self.mpd).state_dict()
-                                cp_data['mpd'] = mpd_s
-                                cp_data['optim_d'] = self.optim_d.state_dict()
-                            if self.msd:
-                                cp_data['msd'] = (self.msd.module if h.num_gpus > 1
-                                        else self.msd).state_dict()
-                            cp_data['optim_g'] = self.optim_g.state_dict()
-                            cp_data['steps'] = self.steps
-                            cp_data['epoch'] = epoch
+                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, ' \
+                            'Mel-Spec. Error : {:4.3f} ({:4.3f}A+{:4.3f}P), ' \
+                            's/b : {:4.3f}'.
+                        format(self.steps, loss_gen_all, mel_error, loss_mel_a,
+                                loss_mel_p, stdur))
 
-                            save_checkpoint(checkpoint_path, cp_data)
-                        del cp_data
+                # checkpointing
+                if self.steps % a.checkpoint_interval == 0 and self.steps != 0:
+                    self.save_checkpoint(sw)
 
-                    # Tensorboard summary logging
-                    if self.steps % a.summary_interval == 0:
-                        sw.add_scalar("training/gen_loss_total", loss_gen_all, self.steps)
-                        sw.add_scalar("training/mel_spec_error", mel_error, self.steps)
-                        sw.add_scalar("performance/secs_per_batch", stdur, self.steps)
-                        for i, param_group in enumerate(self.optim_g.param_groups):
-                            sw.add_scalar(f"training/optim_g_lr_{i}",
-                                        param_group['lr'], self.steps)
-                        sw.flush()
+                # Tensorboard summary logging
+                if self.steps % a.summary_interval == 0:
+                    self.do_summary(sw, loss_gen_all, mel_error, stdur)
 
-                    # Validation
-                    if self.steps % a.validation_interval == 0 and self.steps != 0:
-                        self.validate(sw)
+                # Validation
+                if self.steps % a.validation_interval == 0 and self.steps != 0:
+                    self.validate(sw)
 
                 self.steps += 1
 
@@ -325,11 +308,11 @@ class MyTrainer():
 
             if self.rank == 0:
                 epdur = time.time() - start
-                sw.add_scalar("performance/secs_per_epoch", epdur, epoch)
-                print('Time taken for epoch {} is {} sec\n'.format(epoch + 1, int(epdur)))
+                sw.add_scalar("performance/secs_per_epoch", epdur, self.epoch)
+                print('Time taken for epoch {} is {} sec\n'.format(self.epoch + 1, int(epdur)))
                 sw.flush()
 
-    def train_step(self, i, batch):
+    def train_step(self, i, batch, sw):
         if self.rank == 0:
             self.start_b = time.time()
         x, y, fn, y_mel = batch
@@ -377,11 +360,15 @@ class MyTrainer():
                 dim=0)
         loss_mel = self.mel_loss_o.get_loss(y_mel_a, y_g_hat_mel_a,
                 y_mel_p, y_g_hat_mel_p)
+        loss_mel, loss_mel_a, loss_mel_p = loss_mel
 
         if debug_m:
             print(loss_mel)
 
-        assert not y_g_hat_mels[0].mel_a.isnan().any() and not loss_mel.isnan().any()
+        if y_g_hat_mels[0].mel_a.isnan().any():
+            raise Exception(f"NaN: y_g_hat_mels[0].mel_a: {y_g_hat_mels[0].mel_a}")
+        if loss_mel.isnan().any():
+            raise Exception(f"NaN: loss_mel: {loss_mel}, {loss_mel_a}, {loss_mel_p}")
         #print(f'y_g_hat_mel[0].size() = {y_g_hat_mel[0].size()}')
 
         if self.mpd:
@@ -404,7 +391,12 @@ class MyTrainer():
 
         loss_gen_all.backward()
         self.optim_g.step()
-        return loss_gen_all, loss_mel
+        if self.steps == 1695 and False:
+            sw.add_audio(f'outliers/y_{fn}', y[0], self.steps, self.h.sampling_rate),
+            sw.add_audio(f'outliers/y_g_hats_{fn}', y_g_hats[0], self.steps, self.h.sampling_rate),
+            print(fn, loss_mel)
+            sw.flush()
+        return loss_gen_all, loss_mel, loss_mel_a, loss_mel_p
 
 
     def validate(self, sw):
@@ -493,6 +485,44 @@ class MyTrainer():
             print(f'Validation error: {val_err:4.3f}')
         sw.flush()
         self.generator.train()
+
+    def save_checkpoint(self, sw):
+        checkpoint_path = "{}/g_{:08d}".format(self.a.checkpoint_path, self.steps)
+        cp_data = {'generator': (self.generator.module
+                                if self.h.num_gpus > 1
+                                else self.generator).state_dict(),
+                'min_yghe_value': self.min_yghe_value,
+                'max_yghe_value': self.max_yghe_value}
+        if self.mpd is None:
+            cp_data['optim_g'] = self.optim_g.state_dict()
+            cp_data['steps'] = self.steps
+            cp_data['epoch'] = self.epoch
+        save_checkpoint(checkpoint_path, cp_data)
+        if self.mpd is not None or self.msd is not None:
+            checkpoint_path = "{}/do_{:08d}".format(self.a.checkpoint_path, self.steps)
+            cp_data = {}
+            if self.mpd:
+                mpd_s = (self.mpd.module if self.h.num_gpus > 1
+                        else self.mpd).state_dict()
+                cp_data['mpd'] = mpd_s
+                cp_data['optim_d'] = self.optim_d.state_dict()
+            if self.msd:
+                cp_data['msd'] = (self.msd.module if self.h.num_gpus > 1
+                        else self.msd).state_dict()
+            cp_data['optim_g'] = self.optim_g.state_dict()
+            cp_data['steps'] = self.steps
+            cp_data['epoch'] = self.epoch
+
+            save_checkpoint(checkpoint_path, cp_data)
+
+    def do_summary(self, sw, loss_gen_all, mel_error, stdur):
+        sw.add_scalar("training/gen_loss_total", loss_gen_all, self.steps)
+        sw.add_scalar("training/mel_spec_error", mel_error, self.steps)
+        sw.add_scalar("performance/secs_per_batch", stdur, self.steps)
+        for i, param_group in enumerate(self.optim_g.param_groups):
+            sw.add_scalar(f"training/optim_g_lr_{i}",
+                          param_group['lr'], self.steps)
+        sw.flush()
 
 
 def main():
