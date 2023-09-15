@@ -122,7 +122,8 @@ def mel_spectrogram(y, o: mel_spec_options):
         # Normalize
         phase = torch.exp(1j * phase)
         mel_b_c = torch.complex(mel_b, torch.zeros_like(mel_b))
-        phase = torch.matmul(mel_b_c, phase).angle()
+        phase = torch.matmul(mel_b_c, phase)
+        phase = torch.atan2(phase.imag, phase.real)
         if o.norm_phase:
             phase = (phase + torch.tensor(math.pi)) / (2 * torch.tensor(math.pi))
         mss.mel_p = phase
@@ -195,7 +196,7 @@ class MelDataset(torch.utils.data.Dataset):
             mels_cp = os.path.join(self.cache_dir, f"{_fn_hash}.mel.pt")
             audios_cp = os.path.join(self.cache_dir, f"{_fn_hash}.audio.pt")
             if os.path.exists(mels_cp) and os.path.exists(audios_cp):
-                if i == 1 and np.random.rand() < 0.05:
+                if i == 1 and np.random.rand() < 1.05:
                     continue
                 mels = torch.load(mels_cp, map_location = 'cpu')
                 audios = torch.load(audios_cp, map_location = 'cpu')
