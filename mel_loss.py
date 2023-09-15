@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 class MeanFilter(torch.nn.Module):
     def __init__(self, device, kernel_size=2):
@@ -37,10 +38,12 @@ class MelLossAP():
         for arg in args:
             assert self.phase_filter.conv.weight.data.device == arg.device
         y_mel_a, y_g_hat_mel_a, y_mel_p, y_g_hat_mel_p = args
-        if self.include_phase:
-            y_mel_a, y_g_hat_mel_a = self.norm_mels(y_mel_a,
-                                                    y_g_hat_mel_a)
-        loss_mel = torch.abs(y_mel_a - y_g_hat_mel_a)
+        y_mel_a, y_g_hat_mel_a = self.norm_mels(y_mel_a,
+                                                y_g_hat_mel_a)
+        #print(y_mel_a.size())
+        loss_scale = (y_mel_a.size(0) * y_mel_a.size(2))
+        loss_mel = F.l1_loss(y_mel_a, y_g_hat_mel_a,
+                             reduction='sum') / loss_scale
         if self.include_phase:
             loss_phase = y_mel_p - y_g_hat_mel_p
             #print(1, loss_phase.size())
@@ -53,7 +56,4 @@ class MelLossAP():
             loss_phase = loss_phase * max_ampl
             assert loss_phase.min() >= 0.0 and loss_phase.max() <= 1.0
             loss_mel = loss_mel + loss_phase
-        loss_freq = loss_mel.sum(dim=1).mean()
-        loss_time = loss_mel.sum(dim=2).mean()
-        loss_mel = (0.5 * loss_freq + 0.5 * loss_time)
-        return (loss_mel, loss_freq, loss_time)
+        return loss_mel
