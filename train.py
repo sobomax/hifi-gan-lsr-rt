@@ -65,7 +65,7 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
         if debug:
             print(f'x.size = {x.size()}')
         if chunks is None:
-            chunks = (32, 4, 8, 16)
+            chunks = (4,)
         z = []
         for chunk_size in chunks:
             y = []
@@ -75,6 +75,7 @@ class MySpeechT5HifiGan(SpeechT5HifiGan):
             eframes = self.pre_frames + self.post_frames
             while _x.size(1) > eframes:
                 chunk = _x[:, :chunk_size+eframes, :]
+                assert chunk.size(1) == chunk_size+eframes
                 _y = super().forward(chunk)
                 y.append(_y[:, y_trim_pr:-y_trim_po])
                 _x = _x[:, chunk_size:, :]
@@ -204,7 +205,7 @@ class MyTrainer():
 
         self.train_loader = DataLoader(trainset, num_workers=h.num_workers,
                                 shuffle=a.shuffle_input,
-                                prefetch_factor=2,
+                                prefetch_factor=3,
                                 sampler=train_sampler,
                                 batch_size=h.batch_size,
                                 pin_memory=a.pin_memory,
@@ -224,7 +225,7 @@ class MyTrainer():
                                     base_mels_path=a.input_mels_dir)
             nw = min(1, h.num_workers)
             self.validation_loader = DataLoader(validset, num_workers=nw, shuffle=False,
-                                        prefetch_factor=2,
+                                        prefetch_factor=3,
                                         sampler=None,
                                         batch_size=1,
                                         pin_memory=a.pin_memory,
@@ -256,8 +257,7 @@ class MyTrainer():
                 train_sampler.set_epoch(epoch)
 
             for i, batch in enumerate(self.train_loader):
-                loss_gen_all, loss_mel, loss_freq, loss_time = \
-                  self.train_step(i, batch)
+                loss_gen_all, loss_mel = self.train_step(i, batch)
 
                 if self.rank == 0:
                     # STDOUT logging
@@ -268,10 +268,9 @@ class MyTrainer():
                             #mel_error += F.l1_loss(y_mel[1], y_g_hat_mel[1]).item()
 
                         print('Steps : {:d}, Gen Loss Total : {:4.3f}, ' \
-                                'Mel-Spec. Error : {:4.3f} (fr:{:4.3f}+tm:{:4.3f}), ' \
+                                'Mel-Spec. Error : {:4.3f}, ' \
                                 's/b : {:4.3f}'.
-                            format(self.steps, loss_gen_all, mel_error,
-                                loss_freq, loss_time, stdur))
+                            format(self.steps, loss_gen_all, mel_error, stdur))
 
                     # checkpointing
                     if self.steps % a.checkpoint_interval == 0 and self.steps != 0:
@@ -378,7 +377,6 @@ class MyTrainer():
                 dim=0)
         loss_mel = self.mel_loss_o.get_loss(y_mel_a, y_g_hat_mel_a,
                 y_mel_p, y_g_hat_mel_p)
-        loss_mel, loss_freq, loss_time = loss_mel
 
         if debug_m:
             print(loss_mel)
@@ -406,7 +404,7 @@ class MyTrainer():
 
         loss_gen_all.backward()
         self.optim_g.step()
-        return loss_gen_all, loss_mel, loss_freq, loss_time
+        return loss_gen_all, loss_mel
 
 
     def validate(self, sw):
@@ -418,7 +416,7 @@ class MyTrainer():
             for j, batch in enumerate(self.validation_loader):
                 x, y, fn, y_mel = batch
                 fn = os.path.basename(fn[0])
-                chunksz = min(2 ** (j + 1), 32)
+                chunksz = 4 #min(2 ** (j + 2), 32)
                 y_g_hat = self.generator(x.to(self.device), chunks=(chunksz,))[0]
                 y_mel = [ym.to(self.device) for ym in y_mel]
                 y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), self.mso_loss)
