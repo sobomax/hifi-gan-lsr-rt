@@ -6,3 +6,4 @@ tensorboard>=2.*
 soundfile>=0.*
 matplotlib>=3.*
 transformers>=4.*
+datasets>=2.*
