@@ -14,7 +14,8 @@ from transformers import SpeechT5Processor as ST5P, \
         SpeechT5HifiGan as ST5HG, \
         SpeechT5Config as ST5C
 from datasets import load_dataset
-from utils import get_PBF
+from filters import get_PBF
+from utils import anomaly_check
 
 MAX_WAV_VALUE = 32768.0
 
@@ -75,6 +76,7 @@ class mel_spec_options:
     center = False
     return_phase = False
     norm_phase = False
+    pre_filter = None
 
 class mel_spec:
     fft = None
@@ -102,6 +104,9 @@ def mel_spectrogram(y, o: mel_spec_options):
     else:
         mel_b = mel_basis[mb_name]
 
+    if o.pre_filter is not None:
+        y = o.pre_filter(y)
+
     y = F.pad(y.unsqueeze(1), (int((o.n_fft-o.hop_size)/2), int((o.n_fft-o.hop_size)/2)), mode='reflect')
     y = y.squeeze(1)
     mss = mel_spec()
@@ -109,12 +114,17 @@ def mel_spectrogram(y, o: mel_spec_options):
                       center=o.center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
     ampl = torch.sqrt(mss.fft.real ** 2 + mss.fft.imag ** 2 + (1e-9))
     if o.return_phase:
+        anomaly_check(mss.fft, "mss.fft")
         phase = torch.atan2(mss.fft.imag, mss.fft.real)
+        anomaly_check(phase, "phase 1")
         # Normalize
         phase = torch.exp(1j * phase)
+        anomaly_check(phase, "phase 2")
         mel_b_c = torch.complex(mel_b, torch.zeros_like(mel_b))
         phase = torch.matmul(mel_b_c, phase)
+        anomaly_check(phase, "phase 3")
         phase = torch.atan2(phase.imag, phase.real)
+        anomaly_check(phase, "phase 4")
         if o.norm_phase:
             phase = (phase + torch.tensor(math.pi)) / (2 * torch.tensor(math.pi))
         mss.mel_p = phase
