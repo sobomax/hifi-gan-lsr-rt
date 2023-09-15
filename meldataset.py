@@ -8,24 +8,15 @@ import torch.nn.functional as F
 import numpy as np
 from librosa.util import normalize
 from scipy.io.wavfile import read
-from scipy.signal import firwin
 from librosa.filters import mel as librosa_mel_fn
 from transformers import SpeechT5Processor as ST5P, \
         SpeechT5ForSpeechToSpeech as ST5FSTS, \
         SpeechT5HifiGan as ST5HG, \
         SpeechT5Config as ST5C
 from datasets import load_dataset
+from utils import get_PBF
 
 MAX_WAV_VALUE = 32768.0
-
-
-def get_PBF(fs=16000, l_cut=75.0, h_cut=4000.0):
-    numtaps = 1023  # Number of filter taps (coefficients)
-    coeffs = firwin(numtaps, [l_cut, h_cut], pass_zero='bandpass', fs=fs)
-
-    # Convert to PyTorch tensor
-    filter_kernel = torch.tensor(coeffs, dtype=torch.float32).view(1, 1, -1)
-    return filter_kernel
 
 
 def load_wav(full_path, do_normalize):
