@@ -42,18 +42,28 @@ class MelLossAP():
                                                 y_g_hat_mel_a)
         #print(y_mel_a.size())
         loss_scale = (y_mel_a.size(0) * y_mel_a.size(2))
-        loss_mel = F.l1_loss(y_mel_a, y_g_hat_mel_a,
+        loss_mel = loss_mel_a = F.l1_loss(y_mel_a, y_g_hat_mel_a,
                              reduction='sum') / loss_scale
         if self.include_phase:
-            loss_phase = y_mel_p - y_g_hat_mel_p
-            #print(1, loss_phase.size())
-            loss_phase = torch.sin(loss_phase / 2)
-            #print(2, loss_phase.size())
-            loss_phase = self.phase_filter(loss_phase.unsqueeze(1)).squeeze(1)
-            #print(3, loss_phase.size())
-            loss_phase = loss_phase.abs()
+            loss_mel_p = y_mel_p - y_g_hat_mel_p
+            def lm_check():
+                if loss_mel_p.isnan().any():
+                    raise Exception(f"loss_mel_p anomaly: NaN: {loss_mel_p}")
+            lm_check()
+            loss_mel_p = torch.sin(loss_mel_p / 2)
+            lm_check()
+            loss_mel_p = self.phase_filter(loss_mel_p.unsqueeze(1)).squeeze(1)
+            lm_check()
+            loss_mel_p = loss_mel_p.abs()
+            lm_check()
             max_ampl = torch.max(y_mel_a, y_g_hat_mel_a)
-            loss_phase = loss_phase * max_ampl
-            assert loss_phase.min() >= 0.0 and loss_phase.max() <= 1.0
-            loss_mel = loss_mel + loss_phase
-        return loss_mel
+            loss_mel_p = loss_mel_p * max_ampl
+            lm_check()
+            if loss_mel_p.min() < 0.0 or loss_mel_p.max() > 1.0001:
+                raise Exception(f"loss_mel_p anomaly: min {loss_mel_p.min()}, max {loss_mel_p.max()}")
+            loss_mel_p = loss_mel_p.sum() / loss_mel_p.numel()
+            lm_check()
+            loss_mel = loss_mel_a + loss_mel_p
+        else:
+            loss_mel_p = 0
+        return loss_mel, loss_mel_a, loss_mel_p
