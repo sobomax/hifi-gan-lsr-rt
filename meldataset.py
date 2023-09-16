@@ -83,6 +83,12 @@ class mel_spec:
     mel_a = None
     mel_p = None
 
+def safe_angle(x, epsi=(1e-6)):
+    t = [t + (t.sign() * epsi) for t in (x.imag, x.real)]
+    t = [_t.clip(min=-1/epsi, max=1/epsi) for _t in t]
+    return torch.atan2(t[0], t[1])
+
+
 def mel_spectrogram(y, o: mel_spec_options):
     if torch.min(y) < -1.0001:
         print('min value is ', torch.min(y))
@@ -92,6 +98,7 @@ def mel_spectrogram(y, o: mel_spec_options):
         assert y.max() < 1.1 and _nclamps < nclamps_MAX
         _nclamps += 1
         y = y.clamp(max=1.)
+    anomaly_check(y, f"mel_spectrogram({y})")
 
     global mel_basis, hann_window
     mb_name = str(o.fmax)+'_'+str(y.device)
@@ -114,8 +121,16 @@ def mel_spectrogram(y, o: mel_spec_options):
                       center=o.center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
     ampl = torch.sqrt(mss.fft.real ** 2 + mss.fft.imag ** 2 + (1e-9))
     if o.return_phase:
+        epsi = (1e-9);
         anomaly_check(mss.fft, "mss.fft")
-        phase = torch.atan2(mss.fft.imag, mss.fft.real)
+        def print_min_max(x, xn):
+            print(f'{xn}: min: {x.min()}, max: {x.max()}')
+        #safe_i = mss.fft.imag + (mss.fft.imag.sign() * epsi)
+        #print_min_max(mss.fft.imag, 'mss.fft.imag')
+        #print_min_max(mss.fft.real, 'mss.fft.real')
+        #t = [t + (t.sign() * epsi) for t in (mss.fft.imag, mss.fft.real)]
+        #print_min_max(t[0]/t[1], 'I/R')
+        phase = safe_angle(mss.fft)
         anomaly_check(phase, "phase 1")
         # Normalize
         phase = torch.exp(1j * phase)
@@ -123,7 +138,7 @@ def mel_spectrogram(y, o: mel_spec_options):
         mel_b_c = torch.complex(mel_b, torch.zeros_like(mel_b))
         phase = torch.matmul(mel_b_c, phase)
         anomaly_check(phase, "phase 3")
-        phase = torch.atan2(phase.imag, phase.real)
+        phase = safe_angle(phase)
         anomaly_check(phase, "phase 4")
         if o.norm_phase:
             phase = (phase + torch.tensor(math.pi)) / (2 * torch.tensor(math.pi))
@@ -145,7 +160,7 @@ def get_dataset_filelist(a):
     with open(a.input_validation_file, 'r', encoding='utf-8') as fi:
         validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
                             for x in fi.read().split('\n') if len(x) > 0]
-    return training_files[:3000], validation_files[:64]
+    return training_files[:3000], validation_files[:8]
 
 
 def hash_filename(filename):
