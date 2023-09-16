@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from utils import anomaly_check
+
 class MeanFilter(torch.nn.Module):
     def __init__(self, device, kernel_size=2):
         assert ((kernel_size - 1) % 2) == 0
@@ -22,9 +24,15 @@ class MeanFilter(torch.nn.Module):
 class MelLossAP():
     phase_filter: MeanFilter
     include_phase = False
+    do_anomality_check = False
 
     def __init__(self, device):
         self.phase_filter = MeanFilter(device, kernel_size=5)
+
+    def do_ac(self, *args):
+        if not self.do_anomality_check:
+            return
+        anomaly_check(*args)
 
     def norm_mels(self, y_mel_a, y_g_hat_mel_a):
         max_ampl_val = torch.max(y_mel_a, y_g_hat_mel_a).max()
@@ -45,10 +53,11 @@ class MelLossAP():
         loss_mel = loss_mel_a = F.l1_loss(y_mel_a, y_g_hat_mel_a,
                              reduction='sum') / loss_scale
         if self.include_phase:
+            self.do_ac(y_mel_p, "y_mel_p")
+            self.do_ac(y_g_hat_mel_p, "y_g_hat_mel_p")
             loss_mel_p = y_mel_p - y_g_hat_mel_p
             def lm_check():
-                if loss_mel_p.isnan().any():
-                    raise Exception(f"loss_mel_p anomaly: NaN: {loss_mel_p}")
+                self.do_ac(loss_mel_p, "loss_mel_p")
             lm_check()
             loss_mel_p = torch.sin(loss_mel_p / 2)
             lm_check()
