@@ -104,12 +104,20 @@ class MyMSO(mel_spec_options):
         self.fmin = h.fmin
         self.fmax = h.fmax
 
+from filters import PassBandFilter
 
 class TrainingMSO(MyMSO):
     def __init__(self, h, a):
         super().__init__(h, a)
         self.fmax = h.fmax_for_loss
         self.return_phase = True
+
+class DataSetMSO(TrainingMSO):
+    def __init__(self, h, a):
+        super().__init__(h, a)
+        pbf = PassBandFilter()
+        pbf.eval()
+        self.pre_filter = pbf
 
 class MyTrainer():
     def train(self, rank, a, h):
@@ -206,8 +214,9 @@ class MyTrainer():
 
         mso_ref = MyMSO(h, a)
         self.mso_loss = TrainingMSO(h, a)
+        self.mso_ds = DataSetMSO(h, a)
         trainset = MelDataset(training_filelist, h.segment_size, h.hop_size, h.sampling_rate,
-                            mso_ref, self.mso_loss, n_cache_reuse=1024,
+                            mso_ref, self.mso_ds, n_cache_reuse=1024,
                             shuffle=False if h.num_gpus > 1 else True, device=device,
                             fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir)
 
@@ -230,7 +239,7 @@ class MyTrainer():
 
         if self.rank == 0:
             validset = MelDataset(validation_filelist, h.segment_size, h.hop_size, h.sampling_rate,
-                                    mso_ref, self.mso_loss, split=False, shuffle=False, n_cache_reuse=1024,
+                                    mso_ref, self.mso_ds, split=False, shuffle=False, n_cache_reuse=1024,
                                     device=device, fine_tuning=a.fine_tuning,
                                     base_mels_path=a.input_mels_dir)
             nw = min(1, h.num_workers)
@@ -433,7 +442,7 @@ class MyTrainer():
                     #print(y_mel[0].size(), y_g_hat_mel.mel_a.size())
                     y_mel_an, y_g_hat_mel_an = self.mel_loss_o.norm_mels(
                             y_mel[0], y_g_hat_mel.mel_a)
-                    max_ampl = torch.max(y_mel_an, y_mel_an).squeeze()
+                    max_ampl = torch.max(y_mel_an, y_g_hat_mel_an).squeeze()
                     yghe_data_ph *= max_ampl
                     #print(yghe_data_ph.size())
                     #print(yghe_data_ph.min(), yghe_data_ph.max(), yghe_data_ph.mean())
@@ -443,7 +452,8 @@ class MyTrainer():
                     yghes.append((yghe_name, yghe_data, yghe_data_ph))
 
                     sw.add_text(f'input/filename_{j}', fn, self.steps)
-                    sw.add_audio(f'gt/y_{j}', y[0], self.steps, self.h.sampling_rate),
+                    _y = self.mso_ds.pre_filter(y[0].unsqueeze(0)).squeeze(0)
+                    sw.add_audio(f'gt/y_{j}', _y, self.steps, self.h.sampling_rate),
                     sw.add_figure(f'gt/y_spec_{j}', plot_spectrogram(y_mel[0][0].cpu().numpy()),
                                   self.steps)
 
