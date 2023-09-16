@@ -5,6 +5,7 @@ import torch
 from torch.nn.utils import weight_norm
 matplotlib.use("Agg")
 import matplotlib.pylab as plt
+from numpy import abs as np_abs
 
 
 def plot_spectrogram(spectrogram, *im_a, **im_kw):
@@ -16,7 +17,7 @@ def plot_spectrogram(spectrogram, *im_a, **im_kw):
     cbar_min = spectrogram.min()
     cbar_max = spectrogram.max()
     cbar_mean = spectrogram.mean()
-    format_spec = ".2f" if cbar_max > 0.1 else ".2e"
+    format_spec = ".2f" if np_abs(cbar_max - cbar_min) > 0.1 else ".2e"
     lb = f"min: {cbar_min:{format_spec}}\n" \
             f"max: {cbar_max:{format_spec}}\n" \
             f"mean: {cbar_mean:{format_spec}}"
